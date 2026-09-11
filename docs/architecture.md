@@ -229,5 +229,27 @@ Attach VerificationPipelineResult or error diagnostic
 - **In-Memory Job Queue (`JobQueue`)**: Provides deterministic FIFO job management for development and testing.
 - **Deferred Queue Infrastructure**: M16 is an architectural skeleton. Distributed queue technologies (Celery, Redis, RabbitMQ, SQS) and production database queue persistence are intentionally deferred.
 
+## Frontend Architecture & Demo Dashboard (M17, M18, M19)
+
+Milestones 17, 18, and 19 establish the frontend foundation (`frontend/src/`) using a minimal Indian government and enterprise portal aesthetic.
+
+```text
+React Router (App.jsx)
+    ↓
+MainLayout (Header + Sidebar + PageContainer)
+    ↓
+Pages (DashboardPage / PlaceholderPage)
+    ↓
+Components (StatCard / ComplianceCard / RiskCard / Common UI)
+    ↓
+Isolated Demo Data (frontend/src/data/dashboardData.js)
+```
+
+- **Design System (M17)**: Centralized design tokens (`styles/tokens.css`) specifying accessible typography, a 4px grid spacing system, compact border radii, and a restrained color palette subtly inspired by the Indian National Flag (`#1E4E8C` blue, `#138808` green, `#FF9933`/`#D97706` saffron, neutral surfaces). Common reusable components include `Button`, `Badge`, `Modal`, `Loading`, and `EmptyState`.
+- **Application Layout (M18)**: Structured `MainLayout` providing a sticky government-styled `Header` with national accent bar and auditor status chip, a responsive navigation `Sidebar` mapping all defined routes (`/dashboard`, `/tenders`, `/bidders`, `/documents`, `/verification`, `/audit`, `/settings`), and a standardized `PageContainer`.
+- **Complete Demo Dashboard (M19)**: An information-dense compliance dashboard rendering key metrics (`Active Tenders: 24`, `Verification Pending: 08`, `Compliant Bidders: 71`), a Recent Tenders compliance review table, a statutory `ComplianceCard` (82% overall rate), and a `RiskCard` (LOW risk).
+- **Data Isolation & Future Replacement**: All dashboard values are decoupled in `frontend/src/data/dashboardData.js` and passed via props, making future integration with the backend REST API (`GET /api/v1/dashboard/summary`) straightforward without modifying presentation components.
+
+
 
 
