@@ -139,16 +139,118 @@ def get_bidder(id: str, db: Session = Depends(get_db)):
     return bidder
 
 
+@router.post("/bidders/{bidder_id}/documents", tags=["Documents"], summary="Upload document for bidder", status_code=201, responses={
+    201: {"description": "Document metadata response."},
+    400: {"description": "Bad request."},
+    404: {"description": "Bidder not found."},
+    422: {"description": "Validation error."},
+    500: {"description": "Storage or database error."}
+})
+async def upload_bidder_document(
+    bidder_id: str,
+    file: UploadFile = File(...),
+    document_type: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    """Upload a document for a specific bidder."""
+    service = DocumentService(db=db)
+    try:
+        content = await file.read()
+        return service.upload_document(
+            bidder_id=bidder_id,
+            file_bytes=content,
+            file_name=file.filename or "document.pdf",
+            mime_type=file.content_type or "application/pdf",
+            document_type=document_type,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": str(exc), "details": {}}}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"error": {"code": "VALIDATION_ERROR", "message": str(exc), "details": {}}}) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": {"code": "UPLOAD_FAILED", "message": "Failed to upload document", "details": {}}}) from exc
+
+
+@router.get("/bidders/{bidder_id}/documents", tags=["Documents"], summary="List bidder documents", responses={
+    200: {"description": "List of bidder documents."},
+    500: {"description": "Database query error."}
+})
+def list_bidder_documents(bidder_id: str, page: int = 1, page_size: int = 50, db: Session = Depends(get_db)):
+    """List all documents belonging to a bidder."""
+    service = DocumentService(db=db)
+    try:
+        return service.list_documents(bidder_id=bidder_id, page=page, page_size=page_size)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to list bidder documents", "details": {}}}) from exc
+
+
+@router.get("/documents", tags=["Documents"], summary="List all documents", responses={
+    200: {"description": "List of all documents."},
+    500: {"description": "Database query error."}
+})
+def list_all_documents(bidder_id: str | None = None, page: int = 1, page_size: int = 50, db: Session = Depends(get_db)):
+    """List documents across all bidders or filter by bidder_id."""
+    service = DocumentService(db=db)
+    try:
+        return service.list_documents(bidder_id=bidder_id, page=page, page_size=page_size)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to list documents", "details": {}}}) from exc
+
+
+@router.get("/documents/{document_id}/access", tags=["Documents"], summary="Get secure temporary document access URL", responses={
+    200: {"description": "Secure temporary download URL."},
+    404: {"description": "Document not found."},
+    500: {"description": "Storage access error."}
+})
+def get_document_access(document_id: str, expires_in: int = 3600, db: Session = Depends(get_db)):
+    """Generate a short-lived signed access URL for a private stored document."""
+    service = DocumentService(db=db)
+    try:
+        access = service.get_document_access(document_id, expires_in=expires_in)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": {"code": "STORAGE_ERROR", "message": "Failed to generate document access URL", "details": {}}}) from exc
+    if access is None:
+        raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Document not found", "details": {}}})
+    return access
+
+
+@router.get("/documents/{document_id}", tags=["Documents"], summary="Get document metadata", responses={
+    200: {"description": "Document metadata."},
+    404: {"description": "Document not found."},
+    500: {"description": "Database query error."}
+})
+def get_document(document_id: str, db: Session = Depends(get_db)):
+    """Retrieve metadata for a specific document."""
+    service = DocumentService(db=db)
+    try:
+        doc = service.get_document(document_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to load document", "details": {}}}) from exc
+    if doc is None:
+        raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Document not found", "details": {}}})
+    return doc
+
+
 @router.post("/documents/upload", tags=["Documents"], summary="Upload a document", status_code=201, responses={
     201: {"description": "Document metadata response."},
     400: {"description": "Bad request."},
     422: {"description": "Unprocessable entity."}
 })
-def upload_document(file: UploadFile = File(...), bidder_id: str = Form(...), document_type: str = Form(...), context: dict = Depends(get_api_request_context)):
-    """Route wrapper for DocumentService.upload_document."""
+def upload_document(
+    file: UploadFile = File(...),
+    bidder_id: str = Form(...),
+    document_type: str = Form(...),
+    context: dict = Depends(get_api_request_context),
+):
+    """Route wrapper for DocumentService.upload_document (legacy contract endpoint)."""
     service = DocumentService()
     try:
-        return service.upload_document(bidder_id, document_type, file.filename or "demo.pdf", file.content_type or "application/pdf")
+        return service.upload_document(
+            bidder_id=bidder_id,
+            document_type=document_type,
+            file_name=file.filename or "demo.pdf",
+            mime_type=file.content_type or "application/pdf",
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={"error": {"code": "VALIDATION_ERROR", "message": str(exc), "details": {}}}) from exc
 
