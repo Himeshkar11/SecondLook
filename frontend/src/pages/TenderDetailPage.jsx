@@ -1,46 +1,81 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import PageContainer from '../components/layout/PageContainer.jsx';
 import Badge from '../components/common/Badge.jsx';
 import Button from '../components/common/Button.jsx';
+import Loading from '../components/common/Loading.jsx';
 import EmptyState from '../components/common/EmptyState.jsx';
-import { getTenderById, getBiddersByTender } from '../data/demoData.js';
+import { getTenderById, getTenderBidders } from '../services/tenderService.js';
 
 /**
- * TenderDetailPage — M20
- * Single tender detail view with bidder list and navigation into bidder verification.
+ * TenderDetailPage — Dynamic Supabase-backed tender detail view.
+ * Loads tender details and associated bidders from the backend API using the
+ * tender ID/reference from the URL. Works when loaded directly via URL.
  */
 export default function TenderDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const tenderId = decodeURIComponent(id);
-  const tender = getTenderById(tenderId);
-  const bidders = tender ? getBiddersByTender(tenderId) : [];
 
-  if (!tender) {
-    return (
-      <PageContainer title="Tender Not Found">
-        <EmptyState
-          title="Tender not found"
-          description="The tender reference could not be located in the demo dataset."
-          actionLabel="Back to Tenders"
-          onAction={() => navigate('/tenders')}
-        />
-      </PageContainer>
-    );
-  }
+  const [tender, setTender] = useState(null);
+  const [bidders, setBidders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [notFound, setNotFound] = useState(false);
+  const [biddersLoading, setBiddersLoading] = useState(false);
+
+  const fetchTenderDetails = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setNotFound(false);
+    setTender(null);
+    setBidders([]);
+
+    try {
+      const data = await getTenderById(tenderId);
+      setTender(data);
+
+      // Now fetch associated bidders
+      setBiddersLoading(true);
+      try {
+        const bidderData = await getTenderBidders(tenderId);
+        setBidders(bidderData.items || []);
+      } catch {
+        // Bidders failing is non-fatal; show empty list
+        setBidders([]);
+      } finally {
+        setBiddersLoading(false);
+      }
+    } catch (err) {
+      if (err.status === 404) {
+        setNotFound(true);
+      } else {
+        setError(err.message || 'Unable to load tender details. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [tenderId]);
+
+  useEffect(() => {
+    fetchTenderDetails();
+  }, [fetchTenderDetails]);
 
   const getStatusBadge = (status) => {
-    switch (status) {
+    const s = (status || '').toUpperCase();
+    switch (s) {
       case 'ACTIVE': return <Badge variant="success">Active</Badge>;
-      case 'REVIEW': return <Badge variant="warning">Under Review</Badge>;
-      case 'PENDING': return <Badge variant="info">Pending</Badge>;
+      case 'REVIEW':
+      case 'UNDER_REVIEW': return <Badge variant="warning">Under Review</Badge>;
+      case 'PENDING':
+      case 'DRAFT': return <Badge variant="info">Pending</Badge>;
+      case 'CLOSED': return <Badge variant="neutral">Closed</Badge>;
       default: return <Badge variant="neutral">{status}</Badge>;
     }
   };
 
   const getRiskBadge = (risk) => {
-    switch (risk) {
+    switch ((risk || 'LOW').toUpperCase()) {
       case 'LOW': return <Badge variant="success">Low Risk</Badge>;
       case 'MEDIUM': return <Badge variant="warning">Med Risk</Badge>;
       case 'HIGH': return <Badge variant="danger">High Risk</Badge>;
@@ -49,7 +84,7 @@ export default function TenderDetailPage() {
   };
 
   const getBidderStatusBadge = (status) => {
-    switch (status) {
+    switch ((status || '').toUpperCase()) {
       case 'VERIFIED': return <Badge variant="success">Verified</Badge>;
       case 'PENDING': return <Badge variant="info">Pending</Badge>;
       case 'FLAGGED': return <Badge variant="danger">Flagged</Badge>;
@@ -57,9 +92,57 @@ export default function TenderDetailPage() {
     }
   };
 
+  // ─── Loading state ───────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <PageContainer title="Tender Details">
+        <div
+          style={{
+            backgroundColor: 'var(--color-bg-card)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--color-border)',
+            padding: 'var(--space-8)',
+          }}
+        >
+          <Loading message="Loading tender details..." />
+        </div>
+      </PageContainer>
+    );
+  }
+
+  // ─── Not found state ─────────────────────────────────────────────────────────
+  if (notFound) {
+    return (
+      <PageContainer title="Tender Not Found">
+        <EmptyState
+          title="Tender not found"
+          description="The requested tender could not be found in the database."
+          actionLabel="Back to Tenders"
+          onAction={() => navigate('/tenders')}
+        />
+      </PageContainer>
+    );
+  }
+
+  // ─── Error state ─────────────────────────────────────────────────────────────
+  if (error) {
+    return (
+      <PageContainer title="Tender Details">
+        <EmptyState
+          title="Unable to load tender details"
+          description={error}
+          actionLabel="Retry"
+          onAction={fetchTenderDetails}
+        />
+      </PageContainer>
+    );
+  }
+
+  const tenderRef = tender.reference_number || tender.id;
+
   return (
     <PageContainer
-      title={tender.id}
+      title={tenderRef}
       subtitle={tender.title}
       actions={
         <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
@@ -109,13 +192,13 @@ export default function TenderDetailPage() {
           }}
         >
           {[
-            { label: 'Procuring Organisation', value: tender.organization },
-            { label: 'Department', value: tender.department },
-            { label: 'Category', value: tender.category },
-            { label: 'Estimated Value', value: tender.value },
-            { label: 'Published Date', value: tender.publishedDate },
-            { label: 'Closing Date', value: tender.closingDate },
-            { label: 'Total Bids Received', value: tender.bids },
+            { label: 'Procuring Organisation', value: tender.organization || '—' },
+            { label: 'Department', value: tender.department || '—' },
+            { label: 'Category', value: tender.category || '—' },
+            { label: 'Estimated Value', value: tender.value || '—' },
+            { label: 'Published Date', value: tender.publishedDate || tender.created_at?.slice(0, 10) || '—' },
+            { label: 'Closing Date', value: tender.closingDate || '—' },
+            { label: 'Total Bids Received', value: tender.bids ?? bidders.length },
           ].map((field) => (
             <div key={field.label}>
               <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '2px' }}>
@@ -133,7 +216,7 @@ export default function TenderDetailPage() {
             Scope of Work
           </div>
           <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
-            {tender.description}
+            {tender.description || 'No description available.'}
           </p>
         </div>
       </div>
@@ -166,13 +249,17 @@ export default function TenderDetailPage() {
             </p>
           </div>
           <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-            {bidders.length} of {tender.bids} shown
+            {biddersLoading ? '…' : `${bidders.length} shown`}
           </span>
         </div>
 
-        {bidders.length === 0 ? (
+        {biddersLoading ? (
+          <div style={{ padding: 'var(--space-6)' }}>
+            <Loading message="Loading bidders..." size="sm" />
+          </div>
+        ) : bidders.length === 0 ? (
           <div style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
-            No bidder details available in demo dataset for this tender.
+            No bidders have been associated with this tender.
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -212,19 +299,19 @@ export default function TenderDetailPage() {
                   >
                     <td style={{ padding: 'var(--space-3) var(--space-5)' }}>
                       <div style={{ fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)' }}>
-                        {bidder.name}
+                        {bidder.name || bidder.legal_name}
                       </div>
-                      {bidder.msmeCategory !== 'NOT APPLICABLE' && (
+                      {bidder.msmeCategory && bidder.msmeCategory !== 'NOT APPLICABLE' && (
                         <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: '2px' }}>
                           MSME: {bidder.msmeCategory}
                         </div>
                       )}
                     </td>
                     <td style={{ padding: 'var(--space-3) var(--space-4)', fontFamily: 'var(--font-family-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-                      {bidder.pan}
+                      {bidder.pan || bidder.pan_number || 'N/A'}
                     </td>
                     <td style={{ padding: 'var(--space-3) var(--space-4)', fontFamily: 'var(--font-family-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-                      {bidder.gstin}
+                      {bidder.gstin || bidder.gst_number || 'N/A'}
                     </td>
                     <td style={{ padding: 'var(--space-3) var(--space-4)', textAlign: 'center' }}>
                       <span
@@ -233,7 +320,7 @@ export default function TenderDetailPage() {
                           color: bidder.compliance >= 90 ? 'var(--color-success)' : bidder.compliance >= 70 ? 'var(--color-warning)' : 'var(--color-danger)',
                         }}
                       >
-                        {bidder.compliance}%
+                        {bidder.compliance != null ? `${bidder.compliance}%` : '—'}
                       </span>
                     </td>
                     <td style={{ padding: 'var(--space-3) var(--space-4)' }}>

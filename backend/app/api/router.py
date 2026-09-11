@@ -65,14 +65,39 @@ def list_tenders(page: int = 1, page_size: int = 20, db: Session = Depends(get_d
         ) from exc
 
 
-@router.get("/tenders/{id}", tags=["Tenders"], summary="Get one tender", responses={
-    200: {"description": "Tender response."},
-    404: {"description": "Tender not found."}
+@router.get("/tenders/{id:path}/bidders", tags=["Tenders"], summary="Get bidders for a tender", responses={
+    200: {"description": "List of bidders associated with the tender."},
+    404: {"description": "Tender not found."},
+    500: {"description": "Database query error."}
 })
-def get_tender(id: UUID, db: Session = Depends(get_db)):
-    """Route wrapper for TenderService.get_tender."""
+def get_tender_bidders(id: str, db: Session = Depends(get_db)):
+    """Route wrapper for TenderService.get_tender_bidders."""
     service = TenderService(db=db)
-    tender = service.get_tender(str(id))
+    try:
+        bidders = service.get_tender_bidders(id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to load bidders for tender", "details": {}}},
+        ) from exc
+    return {"items": bidders, "total": len(bidders)}
+
+
+@router.get("/tenders/{id:path}", tags=["Tenders"], summary="Get one tender", responses={
+    200: {"description": "Tender response."},
+    404: {"description": "Tender not found."},
+    500: {"description": "Database query error."}
+})
+def get_tender(id: str, db: Session = Depends(get_db)):
+    """Route wrapper for TenderService.get_tender. Accepts UUID or reference number."""
+    service = TenderService(db=db)
+    try:
+        tender = service.get_tender(id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to load tender details", "details": {}}},
+        ) from exc
     if tender is None:
         raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Tender not found", "details": {}}})
     return tender

@@ -17,3 +17,7 @@ export async function getTenders(page = 1, pageSize = 20) {
 export async function getTenderById(id) {
   return apiClient(`/api/v1/tenders/${encodeURIComponent(id)}`);
 }
+
+export async function getTenderBidders(id) {
+  return apiClient(`/api/v1/tenders/${encodeURIComponent(id)}/bidders`);
+}
