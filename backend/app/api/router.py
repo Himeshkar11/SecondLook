@@ -6,18 +6,47 @@ wired to deterministic demo service classes. They do not contain database
 queries, CRUD, auth, or verification provider calls.
 """
 
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
-from app.api.deps import get_api_request_context
+from app.api.deps import get_api_request_context, get_db
 from app.services.bidder_service import BidderService
 from app.services.document_service import DocumentService
 from app.services.tender_service import TenderService
 from app.services.verification_service import VerificationService
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1")
+
+
+@router.get("/health/database", tags=["Health"], summary="Database health check", responses={
+    200: {"description": "Database connection healthy."},
+    503: {"description": "Database connection unavailable."},
+})
+def health_database(db: Session = Depends(get_db)):
+    """Perform a lightweight real read against the Supabase PostgreSQL database."""
+    if db is None:
+        logger.error("Database session is not available; DATABASE_URL may be missing.")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "database": "unavailable"},
+        )
+
+    try:
+        db.execute(text("SELECT count(*) FROM demo_government_records")).scalar()
+        return {"status": "ok", "database": "connected"}
+    except Exception as exc:
+        logger.error("Database health check query failed: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "database": "unavailable"},
+        )
 
 
 @router.get("/tenders", tags=["Tenders"], summary="List tenders", responses={

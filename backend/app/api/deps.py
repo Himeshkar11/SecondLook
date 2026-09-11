@@ -7,6 +7,8 @@ repositories, downstream services, or business logic.
 
 from typing import Any, Dict
 
+from app.database.repository import get_db
+
 
 def get_api_request_context() -> Dict[str, Any]:
     """Placeholder dependency used to keep the API boundary explicit.

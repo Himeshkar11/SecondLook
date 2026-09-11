@@ -40,6 +40,7 @@ def test_contract_openapi_routes_are_declared_and_docs_endpoints_still_exist():
     paths = schema.get("paths", {})
 
     expected_routes = {
+        "GET /api/v1/health/database": "/api/v1/health/database",
         "GET /api/v1/tenders": "/api/v1/tenders",
         "GET /api/v1/tenders/{id}": "/api/v1/tenders/{id}",
         "GET /api/v1/bidders": "/api/v1/bidders",
@@ -55,6 +56,7 @@ def test_contract_openapi_routes_are_declared_and_docs_endpoints_still_exist():
         assert route_path in paths
 
     assert "get" in paths["/api/v1/tenders"]
+    assert "get" in paths["/api/v1/health/database"]
 
 
 def test_demo_services_provide_deterministic_contract_shapes():
@@ -119,3 +121,52 @@ def test_m10_bbox_routes_call_services_and_match_contract():
 
     assert verification.status_code == 200
     assert verification.json()["id"] == "00000000-0000-0000-0000-000000000003"
+
+
+def test_database_health_endpoint_success_with_live_db():
+    client = TestClient(app)
+    response = client.get("/api/v1/health/database")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["database"] == "connected"
+
+
+def test_database_health_endpoint_failure_when_query_raises_exception():
+    client = TestClient(app)
+
+    class MockFailingSession:
+        def execute(self, *args, **kwargs):
+            raise RuntimeError("Simulated query failure")
+
+    def mock_failing_get_db():
+        yield MockFailingSession()
+
+    from app.api.deps import get_db
+    app.dependency_overrides[get_db] = mock_failing_get_db
+    try:
+        response = client.get("/api/v1/health/database")
+        assert response.status_code == 503
+        data = response.json()
+        assert data["status"] == "error"
+        assert data["database"] == "unavailable"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+def test_database_health_endpoint_failure_when_db_is_none():
+    client = TestClient(app)
+
+    def mock_none_get_db():
+        yield None
+
+    from app.api.deps import get_db
+    app.dependency_overrides[get_db] = mock_none_get_db
+    try:
+        response = client.get("/api/v1/health/database")
+        assert response.status_code == 503
+        data = response.json()
+        assert data["status"] == "error"
+        assert data["database"] == "unavailable"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
