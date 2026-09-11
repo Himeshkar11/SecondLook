@@ -172,3 +172,33 @@ StructuredDocumentData
 - **AI Extraction Interface (`backend/app/ai/`)**: Defines the `AIExtractor` contract consuming `ExtractedText` and returning `StructuredDocumentData`. The `DemoAIExtractor` parses compliance fields deterministically. Provider-agnostic prompt templates are maintained in `backend/app/ai/prompts.py`.
 - **Isolation Rules**: The OCR layer has no dependency on AI. The AI layer consumes only the `ExtractedText` contract and has no dependency on concrete OCR implementations. Neither layer interacts directly with the database, Supabase, or external networks.
 
+## Verification Pipeline Skeleton (M15)
+
+Milestone 15 establishes the central verification pipeline skeleton (`backend/app/verification/`), coordinating the end-to-end verification workflow via constructor dependency injection.
+
+```text
+DocumentInput
+    ↓
+1. OCRProcessor.process() (backend/app/ocr/)
+    ↓ ExtractedText
+2. AIExtractor.extract() (backend/app/ai/)
+    ↓ StructuredDocumentData
+3. GovernmentIntegration.verify() (backend/app/integrations/)
+    ↓ IntegrationResponse
+4. RulesEngine.evaluate() (backend/app/verification/rules.py)
+    ↓ List[RuleEvaluationResult]
+5. ScoringEngine.calculate() (backend/app/verification/scoring.py)
+    ↓ ScoreResult
+6. RiskEngine.assess() (backend/app/verification/risk.py)
+    ↓ RiskResult
+7. VerificationPipelineResult (backend/app/verification/pipeline.py)
+```
+
+- **Pipeline Orchestrator (`VerificationPipeline`)**: Coordinates the sequential execution of OCR, AI extraction, statutory government verification, rules evaluation, scoring, and risk classification. It does not implement OCR/AI logic, database queries, scoring formulas, or risk algorithms directly.
+- **Rules Engine (`RulesEngine`)**: Evaluates a list of modular compliance rules against structured document data and government integration responses, returning `RuleEvaluationResult` objects.
+- **Scoring Engine (`ScoringEngine`)**: Computes normalized score results (`ScoreResult`) from rule evaluation outcomes.
+- **Risk Engine (`RiskEngine`)**: Categorizes risk levels (`LOW`, `MEDIUM`, `HIGH`) based on compliance scores and critical check failures.
+- **Demo / Skeleton Status**: M15 is an in-memory orchestration skeleton. It does not write to the database, alter API contracts, or claim production legal compliance scoring.
+- **Future Replacement Seam**: The pipeline depends solely on abstract interfaces (`OCRProcessor`, `AIExtractor`, `GovernmentIntegration`, `RulesEngine`, `ScoringEngine`, `RiskEngine`), allowing production providers to replace demo implementations without changing the orchestration logic.
+
+
