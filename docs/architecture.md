@@ -151,3 +151,24 @@ PAN / GST / Udyam / MCA / EPFO / ESIC / Startup India / NSIC / DigiLocker / Blac
 ```
 
 The known M11 providers remain demonstration-only: they return contract objects and follow the shared integration status vocabulary without performing real verification tasks.
+
+## Document Processing and AI Extraction Interfaces (M13 & M14)
+
+Document OCR processing and AI extraction are isolated behind provider-neutral interfaces:
+
+```text
+DocumentInput
+    ↓
+OCRProcessor.process() (backend/app/ocr/)
+    ↓
+ExtractedText
+    ↓
+AIExtractor.extract() (backend/app/ai/)
+    ↓
+StructuredDocumentData
+```
+
+- **OCR Interface (`backend/app/ocr/`)**: Defines the `OCRProcessor` contract returning `ExtractedText`. The `DemoOCRProcessor` provides deterministic demo text without requiring external OCR engines or network calls.
+- **AI Extraction Interface (`backend/app/ai/`)**: Defines the `AIExtractor` contract consuming `ExtractedText` and returning `StructuredDocumentData`. The `DemoAIExtractor` parses compliance fields deterministically. Provider-agnostic prompt templates are maintained in `backend/app/ai/prompts.py`.
+- **Isolation Rules**: The OCR layer has no dependency on AI. The AI layer consumes only the `ExtractedText` contract and has no dependency on concrete OCR implementations. Neither layer interacts directly with the database, Supabase, or external networks.
+
