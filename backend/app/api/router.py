@@ -79,21 +79,28 @@ def get_tender(id: UUID, db: Session = Depends(get_db)):
 
 
 @router.get("/bidders", tags=["Bidders"], summary="List bidders", responses={
-    200: {"description": "Paginated bidder list response."}
+    200: {"description": "Paginated bidder list response."},
+    500: {"description": "Database query error."}
 })
-def list_bidders(page: int = 1, page_size: int = 20):
+def list_bidders(page: int = 1, page_size: int = 20, tender_id: str | None = None, db: Session = Depends(get_db)):
     """Route wrapper for BidderService.list_bidders."""
-    service = BidderService()
-    return service.list_bidders(page=page, page_size=page_size)
+    service = BidderService(db=db)
+    try:
+        return service.list_bidders(page=page, page_size=page_size, tender_id=tender_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to load bidders", "details": {}}},
+        ) from exc
 
 
 @router.get("/bidders/{id}", tags=["Bidders"], summary="Get one bidder", responses={
     200: {"description": "Bidder response."},
     404: {"description": "Bidder not found."}
 })
-def get_bidder(id: UUID):
+def get_bidder(id: UUID, db: Session = Depends(get_db)):
     """Route wrapper for BidderService.get_bidder."""
-    service = BidderService()
+    service = BidderService(db=db)
     bidder = service.get_bidder(str(id))
     if bidder is None:
         raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Bidder not found", "details": {}}})
