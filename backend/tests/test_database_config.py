@@ -170,3 +170,95 @@ def test_database_health_endpoint_failure_when_db_is_none():
         assert data["database"] == "unavailable"
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+def test_get_tenders_returns_database_backed_records():
+    client = TestClient(app)
+    response = client.get("/api/v1/tenders")
+    assert response.status_code == 200
+    data = response.json()
+    assert "items" in data
+    assert "total" in data
+    assert data["total"] >= 1
+    titles = [t["title"] for t in data["items"]]
+    assert any("Tender" in title for title in titles)
+
+
+def test_get_tenders_returns_empty_when_no_records():
+    client = TestClient(app)
+
+    class MockEmptySession:
+        def scalar(self, *args, **kwargs):
+            return 0
+
+        def execute(self, *args, **kwargs):
+            class MockResult:
+                def scalars(self):
+                    return self
+                def unique(self):
+                    return self
+                def all(self):
+                    return []
+            return MockResult()
+
+    def mock_empty_get_db():
+        yield MockEmptySession()
+
+    from app.api.deps import get_db
+    app.dependency_overrides[get_db] = mock_empty_get_db
+    try:
+        response = client.get("/api/v1/tenders")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["items"] == []
+        assert data["total"] == 0
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+def test_get_tenders_handles_database_failure_safely():
+    client = TestClient(app)
+
+    class MockFailingSession:
+        def scalar(self, *args, **kwargs):
+            raise RuntimeError("Database connection failure")
+
+    def mock_failing_get_db():
+        yield MockFailingSession()
+
+    from app.api.deps import get_db
+    app.dependency_overrides[get_db] = mock_failing_get_db
+    try:
+        response = client.get("/api/v1/tenders")
+        assert response.status_code == 500
+        data = response.json()
+        assert "error" in data["detail"]
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+def test_get_tenders_response_structure_is_valid():
+    client = TestClient(app)
+    response = client.get("/api/v1/tenders")
+    assert response.status_code == 200
+    data = response.json()
+    assert "items" in data
+    assert "total" in data
+    assert "page" in data
+    assert "page_size" in data
+    if data["items"]:
+        first = data["items"][0]
+        assert "id" in first
+        assert "reference_number" in first
+        assert "title" in first
+        assert "status" in first
+        assert "organization" in first
+
+
+def test_get_tenders_does_not_return_hardcoded_tender_data():
+    client = TestClient(app)
+    response = client.get("/api/v1/tenders")
+    assert response.status_code == 200
+    data = response.json()
+    titles = [t["title"] for t in data["items"]]
+    assert "CPCL Procurement Tender" in titles or len(titles) > 1

@@ -50,21 +50,28 @@ def health_database(db: Session = Depends(get_db)):
 
 
 @router.get("/tenders", tags=["Tenders"], summary="List tenders", responses={
-    200: {"description": "Paginated tender list response."}
+    200: {"description": "Paginated tender list response."},
+    500: {"description": "Database query error."}
 })
-def list_tenders(page: int = 1, page_size: int = 20):
+def list_tenders(page: int = 1, page_size: int = 20, db: Session = Depends(get_db)):
     """Route wrapper for TenderService.list_tenders."""
-    service = TenderService()
-    return service.list_tenders(page=page, page_size=page_size)
+    service = TenderService(db=db)
+    try:
+        return service.list_tenders(page=page, page_size=page_size)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to load tenders", "details": {}}},
+        ) from exc
 
 
 @router.get("/tenders/{id}", tags=["Tenders"], summary="Get one tender", responses={
     200: {"description": "Tender response."},
     404: {"description": "Tender not found."}
 })
-def get_tender(id: UUID):
+def get_tender(id: UUID, db: Session = Depends(get_db)):
     """Route wrapper for TenderService.get_tender."""
-    service = TenderService()
+    service = TenderService(db=db)
     tender = service.get_tender(str(id))
     if tender is None:
         raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Tender not found", "details": {}}})

@@ -1,10 +1,18 @@
 import uuid
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Column, DateTime, ForeignKey, String, Table, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
+
+tender_bidders = Table(
+    "tender_bidders",
+    Base.metadata,
+    Column("tender_id", UUID(as_uuid=True), ForeignKey("tenders.id"), primary_key=True),
+    Column("bidder_id", UUID(as_uuid=True), ForeignKey("bidders.id"), primary_key=True),
+    Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+)
 
 
 class Tender(Base):
