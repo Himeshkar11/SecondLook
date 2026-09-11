@@ -1,0 +1,2 @@
+-- M07: No application seed data.
+-- Database schema will be introduced in later milestones.
