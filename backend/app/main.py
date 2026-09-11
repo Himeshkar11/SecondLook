@@ -1,9 +1,13 @@
 from fastapi import FastAPI
 
+from app.api.router import router as api_router
+
 app = FastAPI(
     title="SecondLook API",
     description="GeM Bid Compliance API",
 )
+
+app.include_router(api_router)
 
 
 @app.get("/")
