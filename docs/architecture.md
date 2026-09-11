@@ -201,4 +201,33 @@ DocumentInput
 - **Demo / Skeleton Status**: M15 is an in-memory orchestration skeleton. It does not write to the database, alter API contracts, or claim production legal compliance scoring.
 - **Future Replacement Seam**: The pipeline depends solely on abstract interfaces (`OCRProcessor`, `AIExtractor`, `GovernmentIntegration`, `RulesEngine`, `ScoringEngine`, `RiskEngine`), allowing production providers to replace demo implementations without changing the orchestration logic.
 
+## Async Worker and Job System Skeleton (M16)
+
+Milestone 16 establishes the asynchronous worker and job orchestration skeleton (`backend/app/workers/`), decoupling the request handling boundary from long-running document verification pipelines.
+
+```text
+POST /verification/start
+        ↓
+Enqueue VerificationJobRecord (JobStatus.QUEUED)
+        ↓
+Worker.process_next_job()
+        ↓
+Transition to JobStatus.PROCESSING
+        ↓
+VerificationPipeline.run() (OCR → AI → Integrations → Rules → Score → Risk)
+        ↓
+Transition to JobStatus.COMPLETED or JobStatus.FAILED
+        ↓
+Attach VerificationPipelineResult or error diagnostic
+```
+
+- **Job Status Lifecycle**: Strictly enforces valid transitions:
+  - `QUEUED` → `PROCESSING` → `COMPLETED`
+  - `QUEUED` → `PROCESSING` → `FAILED`
+  Direct or out-of-order jumps raise `InvalidStateTransitionError`.
+- **Worker Execution Harness (`Worker`)**: Retrieves queued jobs and invokes the injected `VerificationPipeline`. The worker contains no OCR, AI, rules, scoring, risk thresholds, SQL, or HTTP network logic.
+- **In-Memory Job Queue (`JobQueue`)**: Provides deterministic FIFO job management for development and testing.
+- **Deferred Queue Infrastructure**: M16 is an architectural skeleton. Distributed queue technologies (Celery, Redis, RabbitMQ, SQS) and production database queue persistence are intentionally deferred.
+
+
 
