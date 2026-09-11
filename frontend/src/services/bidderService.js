@@ -20,3 +20,5 @@ export async function getBidders(page = 1, pageSize = 20, tenderId = null) {
 export async function getBidderById(id) {
   return apiClient(`/api/v1/bidders/${encodeURIComponent(id)}`);
 }
+
+export const getBidder = getBidderById;

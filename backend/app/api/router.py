@@ -121,12 +121,19 @@ def list_bidders(page: int = 1, page_size: int = 20, tender_id: str | None = Non
 
 @router.get("/bidders/{id}", tags=["Bidders"], summary="Get one bidder", responses={
     200: {"description": "Bidder response."},
-    404: {"description": "Bidder not found."}
+    404: {"description": "Bidder not found."},
+    500: {"description": "Database query error."}
 })
-def get_bidder(id: UUID, db: Session = Depends(get_db)):
+def get_bidder(id: str, db: Session = Depends(get_db)):
     """Route wrapper for BidderService.get_bidder."""
     service = BidderService(db=db)
-    bidder = service.get_bidder(str(id))
+    try:
+        bidder = service.get_bidder(id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to load bidder details", "details": {}}},
+        ) from exc
     if bidder is None:
         raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Bidder not found", "details": {}}})
     return bidder

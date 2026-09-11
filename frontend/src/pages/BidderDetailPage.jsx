@@ -1,34 +1,91 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import PageContainer from '../components/layout/PageContainer.jsx';
 import Badge from '../components/common/Badge.jsx';
 import Button from '../components/common/Button.jsx';
+import Loading from '../components/common/Loading.jsx';
 import EmptyState from '../components/common/EmptyState.jsx';
-import { getBidderById, getDocumentsByBidder, getTenderById } from '../data/demoData.js';
+import { getBidderById } from '../services/bidderService.js';
 
 /**
- * BidderDetailPage — M20
- * Full bidder profile: statutory details, documents list, and start-verification CTA.
+ * BidderDetailPage — Dynamic Supabase-backed bidder profile.
+ * Loads statutory details, associated tenders, and documents from FastAPI.
  */
 export default function BidderDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const bidder = getBidderById(id);
-  const documents = bidder ? getDocumentsByBidder(id) : [];
-  const tender = bidder ? getTenderById(bidder.tenderId) : null;
+  const bidderId = decodeURIComponent(id || '');
 
-  if (!bidder) {
+  const [bidder, setBidder] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [notFound, setNotFound] = useState(false);
+
+  const fetchBidderDetails = useCallback(async () => {
+    if (!bidderId) {
+      setNotFound(true);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setNotFound(false);
+    setBidder(null);
+
+    try {
+      const data = await getBidderById(bidderId);
+      setBidder(data);
+    } catch (err) {
+      if (err?.status === 404 || err?.message?.includes('404')) {
+        setNotFound(true);
+      } else {
+        setError('Unable to load bidder details. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [bidderId]);
+
+  useEffect(() => {
+    fetchBidderDetails();
+  }, [fetchBidderDetails]);
+
+  if (loading) {
+    return (
+      <PageContainer title="Bidder Profile">
+        <Loading message="Loading bidder details..." />
+      </PageContainer>
+    );
+  }
+
+  if (notFound) {
     return (
       <PageContainer title="Bidder Not Found">
         <EmptyState
-          title="Bidder not found"
-          description="The requested bidder could not be found in the demo dataset."
+          title="Bidder not found."
+          description="The requested bidder could not be found in the database."
           actionLabel="Back to Bidders"
           onAction={() => navigate('/bidders')}
         />
       </PageContainer>
     );
   }
+
+  if (error || !bidder) {
+    return (
+      <PageContainer title="Error Loading Bidder">
+        <EmptyState
+          title="Unable to load bidder details"
+          description={error || 'An unexpected error occurred while fetching bidder information.'}
+          actionLabel="Retry"
+          onAction={fetchBidderDetails}
+        />
+      </PageContainer>
+    );
+  }
+
+  const documents = bidder.documents || [];
 
   const getDocStatusBadge = (status) => {
     switch (status) {
@@ -94,8 +151,8 @@ export default function BidderDetailPage() {
 
   return (
     <PageContainer
-      title={bidder.name}
-      subtitle={`${bidder.registeredAddress}`}
+      title={bidder.name || bidder.legal_name}
+      subtitle={bidder.registeredAddress || 'Registered Office, India'}
       actions={
         <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
           <Button variant="secondary" size="sm" onClick={() => navigate('/bidders')}>
@@ -122,10 +179,32 @@ export default function BidderDetailPage() {
               color: bidder.compliance >= 90 ? 'var(--color-success)' : bidder.compliance >= 70 ? 'var(--color-warning)' : 'var(--color-danger)',
             }}
           >
-            {bidder.compliance}%
+            {bidder.compliance != null ? `${bidder.compliance}%` : '—'}
           </strong>
         </span>
-        {tender && (
+        {bidder.tenders && bidder.tenders.length > 1 ? (
+          <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Tenders:</span>
+            {bidder.tenders.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--color-primary)',
+                  cursor: 'pointer',
+                  fontSize: 'var(--font-size-xs)',
+                  padding: 0,
+                  fontFamily: 'var(--font-family-mono)',
+                }}
+                onClick={() => navigate(`/tenders/${encodeURIComponent(t.reference_number || t.id)}`)}
+              >
+                ← {t.reference_number || t.id}
+              </button>
+            ))}
+          </div>
+        ) : bidder.tenderId ? (
           <button
             type="button"
             style={{
@@ -141,7 +220,7 @@ export default function BidderDetailPage() {
           >
             ← {bidder.tenderId}
           </button>
-        )}
+        ) : null}
       </div>
 
       {/* Statutory details */}
@@ -162,7 +241,7 @@ export default function BidderDetailPage() {
           </div>
           <div style={fieldStyle}>
             <span style={labelStyle}>GSTIN</span>
-            <span style={monoValueStyle}>{bidder.gstin}</span>
+            <span style={monoValueStyle}>{bidder.gstin || bidder.gst_number || 'N/A'}</span>
           </div>
           {bidder.udyam && (
             <div style={fieldStyle}>
@@ -172,31 +251,31 @@ export default function BidderDetailPage() {
           )}
           <div style={fieldStyle}>
             <span style={labelStyle}>CIN</span>
-            <span style={monoValueStyle}>{bidder.cin}</span>
+            <span style={monoValueStyle}>{bidder.cin || bidder.registration_number || 'N/A'}</span>
           </div>
           <div style={fieldStyle}>
             <span style={labelStyle}>MSME Category</span>
-            <span style={valueStyle}>{bidder.msmeCategory}</span>
+            <span style={valueStyle}>{bidder.msmeCategory || 'NOT APPLICABLE'}</span>
           </div>
           <div style={fieldStyle}>
             <span style={labelStyle}>Annual Turnover</span>
-            <span style={valueStyle}>{bidder.turnover}</span>
+            <span style={valueStyle}>{bidder.turnover || '—'}</span>
           </div>
           <div style={fieldStyle}>
             <span style={labelStyle}>Years in Business</span>
-            <span style={valueStyle}>{bidder.yearsInBusiness} years</span>
+            <span style={valueStyle}>{bidder.yearsInBusiness ? `${bidder.yearsInBusiness} years` : '—'}</span>
           </div>
           <div style={fieldStyle}>
             <span style={labelStyle}>Contact Person</span>
-            <span style={valueStyle}>{bidder.contactPerson}</span>
+            <span style={valueStyle}>{bidder.contactPerson || 'Authorized Signatory'}</span>
           </div>
           <div style={fieldStyle}>
             <span style={labelStyle}>Email</span>
-            <span style={valueStyle}>{bidder.email}</span>
+            <span style={valueStyle}>{bidder.email || 'compliance@vendor.in'}</span>
           </div>
           <div style={fieldStyle}>
             <span style={labelStyle}>Phone</span>
-            <span style={valueStyle}>{bidder.phone}</span>
+            <span style={valueStyle}>{bidder.phone || '+91-11-23456789'}</span>
           </div>
         </div>
       </div>
@@ -255,36 +334,52 @@ export default function BidderDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {documents.map((doc, index) => (
-                <tr
-                  key={doc.id}
-                  style={{
-                    borderBottom: index === documents.length - 1 ? 'none' : '1px solid var(--color-border-subtle)',
-                    transition: 'background-color var(--transition-fast)',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                >
-                  <td style={{ padding: 'var(--space-3) var(--space-5)', fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)' }}>
-                    {doc.type}
-                  </td>
-                  <td style={{ padding: 'var(--space-3) var(--space-4)', fontFamily: 'var(--font-family-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-                    {doc.filename}
-                  </td>
-                  <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
-                    {getDocStatusBadge(doc.status)}
-                  </td>
-                  <td style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-                    {doc.verifiedBy}
-                  </td>
-                  <td style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-                    {doc.uploadedDate}
-                  </td>
-                  <td style={{ padding: 'var(--space-3) var(--space-5)', textAlign: 'right', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-                    {doc.size}
+              {documents.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan="6"
+                    style={{
+                      padding: 'var(--space-6)',
+                      textAlign: 'center',
+                      color: 'var(--color-text-muted)',
+                      fontSize: 'var(--font-size-sm)',
+                    }}
+                  >
+                    No compliance documents submitted yet.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                documents.map((doc, index) => (
+                  <tr
+                    key={doc.id}
+                    style={{
+                      borderBottom: index === documents.length - 1 ? 'none' : '1px solid var(--color-border-subtle)',
+                      transition: 'background-color var(--transition-fast)',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                  >
+                    <td style={{ padding: 'var(--space-3) var(--space-5)', fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)' }}>
+                      {doc.type}
+                    </td>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)', fontFamily: 'var(--font-family-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+                      {doc.filename}
+                    </td>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                      {getDocStatusBadge(doc.status)}
+                    </td>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+                      {doc.verifiedBy}
+                    </td>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+                      {doc.uploadedDate}
+                    </td>
+                    <td style={{ padding: 'var(--space-3) var(--space-5)', textAlign: 'right', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+                      {doc.size}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

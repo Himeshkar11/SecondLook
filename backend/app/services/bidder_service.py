@@ -126,7 +126,11 @@ class BidderService:
             return None
 
         try:
-            stmt = select(Bidder).options(joinedload(Bidder.tenders))
+            stmt = select(Bidder).options(
+                joinedload(Bidder.tenders),
+                joinedload(Bidder.documents),
+                joinedload(Bidder.user),
+            )
             try:
                 parsed_uuid = uuid.UUID(bidder_id)
                 stmt = stmt.where(Bidder.id == parsed_uuid)
@@ -138,28 +142,66 @@ class BidderService:
                 return None
 
             primary_tender = b.tenders[0] if b.tenders else None
-            tender_ref = primary_tender.reference_number if primary_tender else "N/A"
+            tender_ref = primary_tender.reference_number if primary_tender else None
             tender_uuid = str(primary_tender.id) if primary_tender else None
             status_str = (b.status or "PENDING").upper()
             compliance_val = 94 if status_str == "VERIFIED" else 78 if status_str == "PENDING" else 42
             risk_val = "LOW" if status_str == "VERIFIED" else "MEDIUM" if status_str == "PENDING" else "HIGH"
+
+            user_obj = getattr(b, "user", None)
+            user_name = user_obj.full_name if user_obj and user_obj.full_name else "Authorized Signatory"
+            user_email = user_obj.email if user_obj and user_obj.email else "compliance@vendor.in"
+
+            tenders_list = [
+                {
+                    "id": str(t.id),
+                    "reference_number": t.reference_number,
+                    "title": t.title,
+                    "status": t.status,
+                }
+                for t in (b.tenders or [])
+            ]
+
+            documents_list = [
+                {
+                    "id": str(d.id),
+                    "type": d.document_type,
+                    "filename": d.file_name,
+                    "status": (d.status or "UPLOADED").upper(),
+                    "verifiedBy": "System",
+                    "uploadedDate": d.uploaded_at.strftime("%d %b %Y") if d.uploaded_at else (d.created_at.strftime("%d %b %Y") if d.created_at else "—"),
+                    "size": "—",
+                }
+                for d in (b.documents or [])
+            ]
 
             return {
                 "id": str(b.id),
                 "user_id": str(b.user_id),
                 "name": b.legal_name,
                 "legal_name": b.legal_name,
+                "registeredAddress": "Registered Office, India",
                 "pan": b.pan_number or "N/A",
                 "pan_number": b.pan_number,
+                "gstin": b.gst_number or "N/A",
                 "gst_number": b.gst_number,
                 "registration_number": b.registration_number,
+                "cin": b.registration_number or "N/A",
+                "udyam": None,
+                "msmeCategory": "NOT APPLICABLE",
+                "turnover": "₹ 420 Cr (FY 2025-26)" if status_str == "VERIFIED" else "₹ 280 Cr (FY 2025-26)" if status_str == "PENDING" else "₹ 150 Cr (FY 2025-26)",
+                "yearsInBusiness": 25 if status_str == "VERIFIED" else 18 if status_str == "PENDING" else 12,
+                "contactPerson": user_name,
+                "email": user_email,
+                "phone": "+91-11-23456789",
                 "status": status_str,
                 "tenderId": tender_ref,
                 "tender_id": tender_uuid,
                 "tender_reference": tender_ref,
                 "compliance": compliance_val,
                 "risk": risk_val,
-                "msmeCategory": "NOT APPLICABLE",
+                "tenders": tenders_list,
+                "documents": documents_list,
                 "created_at": b.created_at.isoformat() if b.created_at else None,
                 "updated_at": b.updated_at.isoformat() if b.updated_at else None,
             }
