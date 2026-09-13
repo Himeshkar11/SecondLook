@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.ai.tender_extractor import get_tender_requirement_extractor
 from app.database.connection import SessionLocal
 from app.models.bidder import Bidder
 from app.models.document import Document
@@ -23,10 +24,13 @@ from app.models.tender import Tender
 from app.models.tender_requirement import RequirementEvaluation, TenderRequirement
 from app.schemas.compliance import (
     DEFAULT_COMPLIANCE_DISCLAIMER,
+    VALID_REQUIREMENT_STATUSES,
+    VALID_REQUIREMENT_TYPES,
     BidderComplianceResponse,
     ComplianceSummary,
     RequirementEvaluationRead,
     TenderRequirementCreate,
+    TenderRequirementUpdate,
 )
 from app.verification.compliance_engine import ComplianceEngine, Evidence
 
@@ -41,6 +45,9 @@ DEFAULT_DEMO_REQUIREMENTS = [
         "type": "GST",
         "mandatory": True,
         "display_order": 1,
+        "status": "APPROVED",
+        "rule_type": "STATUS_EQUALS",
+        "parameters": {"source": "GST", "field": "status", "operator": "EQUALS", "expected_value": "ACTIVE"},
         "rule_config": [
             {"source": "GST", "field": "status", "operator": "EQUALS", "expected_value": "ACTIVE"}
         ],
@@ -52,6 +59,9 @@ DEFAULT_DEMO_REQUIREMENTS = [
         "type": "GST",
         "mandatory": True,
         "display_order": 2,
+        "status": "APPROVED",
+        "rule_type": "FIELD_EQUALS",
+        "parameters": {"source": "GST", "field": "state", "operator": "EQUALS", "expected_value": "Tamil Nadu"},
         "rule_config": [
             {"source": "GST", "field": "state", "operator": "EQUALS", "expected_value": "Tamil Nadu"}
         ],
@@ -63,6 +73,9 @@ DEFAULT_DEMO_REQUIREMENTS = [
         "type": "PAN",
         "mandatory": True,
         "display_order": 3,
+        "status": "APPROVED",
+        "rule_type": "STATUS_EQUALS",
+        "parameters": {"source": "PAN", "field": "status", "operator": "EQUALS", "expected_value": "ACTIVE"},
         "rule_config": [
             {"source": "PAN", "field": "status", "operator": "EQUALS", "expected_value": "ACTIVE"}
         ],
@@ -71,7 +84,7 @@ DEFAULT_DEMO_REQUIREMENTS = [
 
 
 class ComplianceService:
-    """Service orchestrating compliance evaluations for tender requirements."""
+    """Service orchestrating compliance evaluations and tender requirement management."""
 
     def __init__(self, db: Optional[Session] = None) -> None:
         self.db = db
@@ -83,46 +96,335 @@ class ComplianceService:
             return SessionLocal(), True
         raise RuntimeError("No database connection available")
 
-    def get_tender_requirements(self, tender_id: str) -> List[TenderRequirement]:
-        """Fetch all statutory requirements for a tender, ensuring defaults if empty."""
+    def get_tender_requirements(
+        self, tender_id: str, status: Optional[str] = None
+    ) -> List[TenderRequirement]:
+        """Fetch all requirements for a tender, optionally filtered by lifecycle status."""
         session, should_close = self._get_session()
         try:
             t_uuid = uuid.UUID(tender_id) if isinstance(tender_id, str) else tender_id
-            stmt = (
-                select(TenderRequirement)
-                .where(TenderRequirement.tender_id == t_uuid)
-                .order_by(TenderRequirement.display_order.asc())
-            )
+            stmt = select(TenderRequirement).where(TenderRequirement.tender_id == t_uuid)
+            if status:
+                stmt = stmt.where(TenderRequirement.status == status.upper())
+            stmt = stmt.order_by(TenderRequirement.display_order.asc(), TenderRequirement.created_at.asc())
             requirements = list(session.execute(stmt).scalars().all())
-            if not requirements:
+            if not requirements and not status:
                 requirements = self.ensure_default_demo_requirements(str(t_uuid), session=session)
             return requirements
         finally:
             if should_close:
                 session.close()
 
+    def get_tender_requirement(self, requirement_id: str) -> Optional[TenderRequirement]:
+        """Fetch a single tender requirement by its UUID."""
+        session, should_close = self._get_session()
+        try:
+            req_uuid = uuid.UUID(requirement_id) if isinstance(requirement_id, str) else requirement_id
+            stmt = select(TenderRequirement).where(TenderRequirement.id == req_uuid)
+            return session.execute(stmt).scalars().first()
+        finally:
+            if should_close:
+                session.close()
+
     def create_tender_requirement(
-        self, tender_id: str, data: TenderRequirementCreate
+        self, tender_id: str, data: TenderRequirementCreate, user_id: Optional[str] = None
     ) -> TenderRequirement:
-        """Create a new requirement for a tender."""
+        """Create a new requirement for a tender. Initial status defaults to UNDER_REVIEW or DRAFT.
+        
+        Direct escalation to APPROVED is prevented on creation.
+        """
         session, should_close = self._get_session()
         try:
             t_uuid = uuid.UUID(tender_id) if isinstance(tender_id, str) else tender_id
+            
+            # Auto-generate code if omitted
+            req_type = data.type.upper() if data.type else "GST"
+            code = data.code
+            if not code:
+                count_stmt = select(TenderRequirement).where(TenderRequirement.tender_id == t_uuid)
+                existing_cnt = len(list(session.execute(count_stmt).scalars().all()))
+                code = f"REQ-{req_type}-{existing_cnt + 1:03d}"
+
+            # Ensure initial status is not directly APPROVED
+            initial_status = data.status.upper() if data.status else "UNDER_REVIEW"
+            if initial_status == "APPROVED":
+                initial_status = "UNDER_REVIEW"
+
+            # Build rule_config from rule_type and parameters if rule_config is empty
+            rule_config = data.rule_config or []
+            if not rule_config and data.rule_type and data.parameters:
+                params = data.parameters
+                rule_config = [{
+                    "source": params.get("source", req_type),
+                    "field": params.get("field", "status"),
+                    "operator": params.get("operator", "EQUALS"),
+                    "expected_value": params.get("expected_value", "ACTIVE"),
+                }]
+
+            creator_uuid = None
+            if user_id:
+                try:
+                    creator_uuid = uuid.UUID(user_id)
+                except ValueError:
+                    creator_uuid = None
+
             req = TenderRequirement(
                 id=uuid.uuid4(),
                 tender_id=t_uuid,
-                code=data.code,
+                code=code,
                 title=data.title,
                 description=data.description,
-                type=data.type,
+                type=req_type,
                 mandatory=data.mandatory,
                 display_order=data.display_order,
-                rule_config=data.rule_config,
+                status=initial_status,
+                rule_type=data.rule_type,
+                parameters=data.parameters,
+                rule_config=rule_config,
+                source_document_id=data.source_document_id,
+                source_text=data.source_text,
+                source_page=data.source_page,
+                source_section=data.source_section,
+                created_by=creator_uuid,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
             )
             session.add(req)
             session.commit()
             session.refresh(req)
             return req
+        finally:
+            if should_close:
+                session.close()
+
+    def update_tender_requirement(
+        self, requirement_id: str, data: TenderRequirementUpdate
+    ) -> TenderRequirement:
+        """Update an existing requirement.
+        
+        Enforces:
+        1. Reject direct escalation to APPROVED via generic update.
+        2. If requirement was APPROVED and core rule/content fields are modified,
+           automatically demote status to UNDER_REVIEW and clear approved_at/approved_by.
+        """
+        session, should_close = self._get_session()
+        try:
+            req_uuid = uuid.UUID(requirement_id) if isinstance(requirement_id, str) else requirement_id
+            req = session.get(TenderRequirement, req_uuid)
+            if req is None:
+                raise KeyError(f"Tender requirement with ID '{requirement_id}' not found")
+
+            # Check for illegal direct escalation to APPROVED
+            if data.status and data.status.upper() == "APPROVED":
+                raise ValueError(
+                    "Cannot escalate requirement status to APPROVED directly via generic update. "
+                    "Use the dedicated /approve endpoint."
+                )
+
+            # Detect content modifications that invalidate prior approval
+            content_changed = False
+            if data.title is not None and data.title != req.title:
+                req.title = data.title
+                content_changed = True
+            if data.description is not None and data.description != req.description:
+                req.description = data.description
+                content_changed = True
+            if data.type is not None and data.type.upper() != req.type:
+                req.type = data.type.upper()
+                content_changed = True
+            if data.mandatory is not None and data.mandatory != req.mandatory:
+                req.mandatory = data.mandatory
+                content_changed = True
+            if data.display_order is not None and data.display_order != req.display_order:
+                req.display_order = data.display_order
+            if data.rule_type is not None and data.rule_type != req.rule_type:
+                req.rule_type = data.rule_type
+                content_changed = True
+            if data.parameters is not None and data.parameters != req.parameters:
+                req.parameters = data.parameters
+                content_changed = True
+            if data.rule_config is not None and data.rule_config != req.rule_config:
+                req.rule_config = data.rule_config
+                content_changed = True
+            if data.source_text is not None:
+                req.source_text = data.source_text
+            if data.source_page is not None:
+                req.source_page = data.source_page
+            if data.source_section is not None:
+                req.source_section = data.source_section
+
+            # Demote if previously approved and content changed
+            if req.status == "APPROVED" and content_changed:
+                req.status = "UNDER_REVIEW"
+                req.approved_at = None
+                req.approved_by = None
+            elif data.status is not None:
+                new_status = data.status.upper()
+                if new_status not in VALID_REQUIREMENT_STATUSES:
+                    raise ValueError(f"Invalid status '{data.status}'. Allowed statuses: {sorted(VALID_REQUIREMENT_STATUSES)}")
+                
+                # Enforce state transition rules
+                allowed_transitions = {
+                    "AI_SUGGESTED": {"UNDER_REVIEW", "REJECTED"},
+                    "DRAFT": {"UNDER_REVIEW", "REJECTED"},
+                    "UNDER_REVIEW": {"DRAFT", "REJECTED"},
+                    "APPROVED": {"UNDER_REVIEW", "ARCHIVED"},
+                    "REJECTED": {"UNDER_REVIEW", "ARCHIVED"},
+                    "ARCHIVED": {"UNDER_REVIEW"},
+                }
+                if new_status != req.status:
+                    if new_status not in allowed_transitions.get(req.status, set()):
+                        raise ValueError(f"Invalid state transition from {req.status} to {new_status}")
+                    req.status = new_status
+
+            req.updated_at = datetime.now(timezone.utc)
+            session.commit()
+            session.refresh(req)
+            return req
+        finally:
+            if should_close:
+                session.close()
+
+    def approve_requirement(
+        self, requirement_id: str, officer_id: Optional[str] = None
+    ) -> TenderRequirement:
+        """Explicitly approve a requirement by a procurement officer.
+        
+        Only APPROVED requirements will be evaluated by the ComplianceEngine.
+        Allowed transitions to APPROVED: AI_SUGGESTED, DRAFT, UNDER_REVIEW (or already APPROVED).
+        REJECTED and ARCHIVED cannot be approved directly.
+        """
+        session, should_close = self._get_session()
+        try:
+            req_uuid = uuid.UUID(requirement_id) if isinstance(requirement_id, str) else requirement_id
+            req = session.get(TenderRequirement, req_uuid)
+            if req is None:
+                raise KeyError(f"Tender requirement with ID '{requirement_id}' not found")
+
+            if req.status in ("ARCHIVED", "REJECTED"):
+                raise ValueError(
+                    f"Invalid state transition: Cannot approve requirement {requirement_id} "
+                    f"with status {req.status}. Only requirements in AI_SUGGESTED, DRAFT, or UNDER_REVIEW can be approved."
+                )
+
+            officer_uuid = None
+            if officer_id:
+                try:
+                    officer_uuid = uuid.UUID(officer_id)
+                except ValueError:
+                    officer_uuid = None
+
+            now = datetime.now(timezone.utc)
+            req.status = "APPROVED"
+            req.approved_at = now
+            req.updated_at = now
+            req.approved_by = officer_uuid
+            session.commit()
+            session.refresh(req)
+            return req
+        finally:
+            if should_close:
+                session.close()
+
+    def reject_requirement(
+        self, requirement_id: str, reason: Optional[str] = None
+    ) -> TenderRequirement:
+        """Reject a candidate or existing requirement so it is not evaluated."""
+        session, should_close = self._get_session()
+        try:
+            req_uuid = uuid.UUID(requirement_id) if isinstance(requirement_id, str) else requirement_id
+            req = session.get(TenderRequirement, req_uuid)
+            if req is None:
+                raise KeyError(f"Tender requirement with ID '{requirement_id}' not found")
+
+            if req.status == "ARCHIVED":
+                raise ValueError(f"Invalid state transition: Cannot reject ARCHIVED requirement {requirement_id}")
+
+            now = datetime.now(timezone.utc)
+            req.status = "REJECTED"
+            req.updated_at = now
+            session.commit()
+            session.refresh(req)
+            return req
+        finally:
+            if should_close:
+                session.close()
+
+    def extract_tender_requirements(
+        self, tender_id: str, text: Optional[str] = None, document_id: Optional[str] = None
+    ) -> List[TenderRequirement]:
+        """Extract requirement candidates from tender text or document using TenderRequirementExtractor.
+        
+        All extracted candidates are stored strictly with status AI_SUGGESTED.
+        They must be reviewed and explicitly approved before the ComplianceEngine can evaluate them.
+        """
+        session, should_close = self._get_session()
+        try:
+            t_uuid = uuid.UUID(tender_id) if isinstance(tender_id, str) else tender_id
+            tender = session.get(Tender, t_uuid)
+            if tender is None:
+                raise KeyError(f"Tender with ID '{tender_id}' not found")
+
+            extraction_text = text
+            source_doc_uuid: Optional[uuid.UUID] = None
+            if document_id:
+                try:
+                    source_doc_uuid = uuid.UUID(document_id)
+                    doc = session.get(Document, source_doc_uuid)
+                    if doc and not extraction_text:
+                        extraction_text = doc.ocr_text or ""
+                except ValueError:
+                    pass
+
+            if not extraction_text or not extraction_text.strip():
+                raise ValueError("No tender text or document OCR text available for extraction")
+
+            extractor = get_tender_requirement_extractor()
+            candidates = extractor.extract_requirements(text=extraction_text, document_id=document_id)
+
+            # Fetch existing count to sequence display_order and codes
+            count_stmt = select(TenderRequirement).where(TenderRequirement.tender_id == t_uuid)
+            existing_cnt = len(list(session.execute(count_stmt).scalars().all()))
+
+            created_records: List[TenderRequirement] = []
+            for idx, candidate in enumerate(candidates, start=1):
+                # Build rule_config
+                rule_config = []
+                if candidate.rule_type and candidate.parameters:
+                    rule_config = [{
+                        "source": candidate.parameters.get("source", candidate.type),
+                        "field": candidate.parameters.get("field", "status"),
+                        "operator": candidate.parameters.get("operator", "EQUALS"),
+                        "expected_value": candidate.parameters.get("expected_value", "ACTIVE"),
+                    }]
+
+                req = TenderRequirement(
+                    id=uuid.uuid4(),
+                    tender_id=t_uuid,
+                    code=candidate.code or f"REQ-{candidate.type}-{existing_cnt + idx:03d}",
+                    title=candidate.title,
+                    description=candidate.description,
+                    type=candidate.type,
+                    mandatory=candidate.mandatory,
+                    display_order=existing_cnt + idx,
+                    status="AI_SUGGESTED",
+                    rule_type=candidate.rule_type,
+                    parameters=candidate.parameters,
+                    rule_config=rule_config,
+                    source_document_id=source_doc_uuid,
+                    source_text=candidate.source_text,
+                    source_page=candidate.source_page,
+                    source_section=candidate.source_section,
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                )
+                session.add(req)
+                created_records.append(req)
+
+            session.commit()
+            for r in created_records:
+                session.refresh(r)
+            return created_records
         finally:
             if should_close:
                 session.close()
@@ -157,6 +459,9 @@ class ComplianceService:
                     type=item["type"],
                     mandatory=item["mandatory"],
                     display_order=item["display_order"],
+                    status=item.get("status", "APPROVED"),
+                    rule_type=item.get("rule_type"),
+                    parameters=item.get("parameters"),
                     rule_config=item["rule_config"],
                 )
                 sess.add(req)
@@ -264,7 +569,13 @@ class ComplianceService:
             mandatory_failed_cnt = 0
             mandatory_not_verified_cnt = 0
 
-            for req in requirements:
+            # Strict Task 12 Approval Gate: ComplianceEngine only evaluates APPROVED requirements
+            approved_requirements = [
+                req for req in requirements
+                if getattr(req, "status", "APPROVED") == "APPROVED"
+            ]
+
+            for req in approved_requirements:
                 rule_config = req.rule_config or []
                 if isinstance(rule_config, dict):
                     rule_config = [rule_config]
@@ -333,7 +644,7 @@ class ComplianceService:
             session.commit()
 
             summary = ComplianceSummary(
-                total_requirements=len(requirements),
+                total_requirements=len(approved_requirements),
                 pass_count=pass_cnt,
                 fail_count=fail_cnt,
                 partial_count=partial_cnt,

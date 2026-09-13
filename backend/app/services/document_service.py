@@ -20,6 +20,7 @@ from app.config.settings import settings
 from app.database.connection import SessionLocal
 from app.models.bidder import Bidder
 from app.models.document import Document
+from app.models.tender import Tender
 from app.workers.jobs import (
     DocumentAIJobRecord,
     DocumentAIStatus,
@@ -54,6 +55,11 @@ ALLOWED_DOCUMENT_TYPES = {
     "OEM_AUTHORIZATION",
     "MAKE_IN_INDIA",
     "OTHER",
+    # Task 12 Tender document types
+    "TENDER_DOCUMENT",
+    "TENDER_CORRIGENDUM",
+    "TENDER_ADDENDUM",
+    "TENDER_OTHER",
 }
 
 
@@ -115,27 +121,30 @@ class DocumentService:
 
     def upload_document(
         self,
-        bidder_id: str,
+        bidder_id: Optional[str] = None,
         document_type: str = "OTHER",
         file_name: str = "demo.pdf",
         mime_type: str = "application/pdf",
         file_bytes: Optional[bytes] = None,
         enqueue_ocr: bool = True,
+        tender_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Validate, upload to Supabase Storage, persist metadata in PostgreSQL, and queue OCR.
 
         Supports both real file uploads (file_bytes provided) and deterministic contract-shape
         calls (file_bytes is None) for legacy contract verification.
+        Supports associating with either a bidder_id or a tender_id.
         """
         # Handle legacy contract call where file_bytes is not provided
         if file_bytes is None:
-            if not bidder_id or not document_type:
-                raise ValueError("bidder_id and document_type are required")
+            if (not bidder_id and not tender_id) or not document_type:
+                raise ValueError("bidder_id or tender_id, and document_type are required")
             if not file_name.endswith((".pdf", ".png", ".jpg", ".jpeg")):
                 raise ValueError("unsupported document extension")
             return {
                 "id": "00000000-0000-0000-0000-000000000004",
                 "bidder_id": bidder_id,
+                "tender_id": tender_id,
                 "document_type": document_type,
                 "file_name": file_name,
                 "mime_type": mime_type,
@@ -144,13 +153,21 @@ class DocumentService:
                 "uploaded_at": "2026-09-11T00:00:00Z",
             }
 
-        if not bidder_id:
-            raise ValueError("bidder_id is required")
+        if not bidder_id and not tender_id:
+            raise ValueError("Either bidder_id or tender_id is required")
 
-        try:
-            bidder_uuid = uuid.UUID(bidder_id)
-        except ValueError as exc:
-            raise ValueError(f"Invalid bidder ID format: {bidder_id}") from exc
+        bidder_uuid: Optional[uuid.UUID] = None
+        tender_uuid: Optional[uuid.UUID] = None
+        if bidder_id:
+            try:
+                bidder_uuid = uuid.UUID(bidder_id)
+            except ValueError as exc:
+                raise ValueError(f"Invalid bidder ID format: {bidder_id}") from exc
+        if tender_id:
+            try:
+                tender_uuid = uuid.UUID(tender_id)
+            except ValueError as exc:
+                raise ValueError(f"Invalid tender ID format: {tender_id}") from exc
 
         # 1. Validate document type (normalize and support aliases like vendor-gst)
         raw_doc_type = (document_type or "OTHER").strip()
@@ -195,15 +212,25 @@ class DocumentService:
             raise RuntimeError("Database session unavailable")
 
         try:
-            # 5. Validate bidder exists in DB
-            bidder = session.scalar(select(Bidder).where(Bidder.id == bidder_uuid))
-            if bidder is None:
-                raise KeyError(f"Bidder with ID '{bidder_id}' not found")
+            vendor_name = "Tender Document"
+            # 5. Validate bidder / tender exists in DB
+            if bidder_uuid:
+                bidder = session.scalar(select(Bidder).where(Bidder.id == bidder_uuid))
+                if bidder is None:
+                    raise KeyError(f"Bidder with ID '{bidder_id}' not found")
+                vendor_name = bidder.legal_name
+                storage_folder = str(bidder_id)
+            else:
+                tender = session.scalar(select(Tender).where(Tender.id == tender_uuid))
+                if tender is None:
+                    raise KeyError(f"Tender with ID '{tender_id}' not found")
+                vendor_name = tender.title
+                storage_folder = f"tenders/{tender_id}"
 
             # 6. Generate secure safe storage path
             doc_uuid = uuid.uuid4()
             safe_name = sanitize_filename(file_name)
-            storage_path = f"{bidder_id}/{doc_uuid}_{safe_name}"
+            storage_path = f"{storage_folder}/{doc_uuid}_{safe_name}"
 
             # 7. Upload to Supabase Storage
             self._upload_to_storage(storage_path, file_bytes, normalized_mime)
@@ -213,6 +240,7 @@ class DocumentService:
             doc = Document(
                 id=doc_uuid,
                 bidder_id=bidder_uuid,
+                tender_id=tender_uuid,
                 document_type=normalized_doc_type,
                 file_name=file_name,
                 storage_path=storage_path,
@@ -241,7 +269,8 @@ class DocumentService:
             if enqueue_ocr:
                 ocr_job = DocumentOCRJobRecord(
                     document_id=str(doc.id),
-                    bidder_id=str(doc.bidder_id),
+                    bidder_id=str(doc.bidder_id) if doc.bidder_id else None,
+                    tender_id=str(doc.tender_id) if doc.tender_id else None,
                     storage_path=doc.storage_path,
                     file_name=doc.file_name,
                     mime_type=doc.mime_type,
@@ -252,8 +281,9 @@ class DocumentService:
 
             return {
                 "id": str(doc.id),
-                "bidder_id": str(doc.bidder_id),
-                "vendor_name": bidder.legal_name,
+                "bidder_id": str(doc.bidder_id) if doc.bidder_id else None,
+                "tender_id": str(doc.tender_id) if doc.tender_id else None,
+                "vendor_name": vendor_name,
                 "document_type": doc.document_type,
                 "file_name": doc.file_name,
                 "storage_path": doc.storage_path,
@@ -270,10 +300,11 @@ class DocumentService:
     def list_documents(
         self,
         bidder_id: Optional[str] = None,
+        tender_id: Optional[str] = None,
         page: int = 1,
         page_size: int = 50,
     ) -> Dict[str, Any]:
-        """List documents from PostgreSQL, optionally filtered by bidder_id."""
+        """List documents from PostgreSQL, optionally filtered by bidder_id or tender_id."""
         session = self.db
         should_close = False
         if session is None and SessionLocal is not None:
@@ -295,18 +326,27 @@ class DocumentService:
                 except ValueError:
                     return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
+            if tender_id:
+                try:
+                    tender_uuid = uuid.UUID(tender_id)
+                    count_stmt = count_stmt.where(Document.tender_id == tender_uuid)
+                    stmt = stmt.where(Document.tender_id == tender_uuid)
+                except ValueError:
+                    return {"items": [], "total": 0, "page": page, "page_size": page_size}
+
             total = session.scalar(count_stmt) or 0
             stmt = stmt.order_by(Document.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
             docs = session.execute(stmt).scalars().unique().all()
 
             items = []
             for d in docs:
-                vendor_name = d.bidder.legal_name if d.bidder else "Unknown Vendor"
+                vendor_name = d.bidder.legal_name if d.bidder else ("Tender Document" if d.tender_id else "Unknown Vendor")
                 effective_status = (d.ocr_status or d.status or "UPLOADED").upper()
                 items.append({
                     "id": str(d.id),
-                    "bidder_id": str(d.bidder_id),
-                    "bidderId": str(d.bidder_id),
+                    "bidder_id": str(d.bidder_id) if d.bidder_id else None,
+                    "bidderId": str(d.bidder_id) if d.bidder_id else None,
+                    "tender_id": str(d.tender_id) if d.tender_id else None,
                     "vendor_name": vendor_name,
                     "document_type": d.document_type,
                     "type": d.document_type,
@@ -364,12 +404,13 @@ class DocumentService:
             if doc is None:
                 return None
 
-            vendor_name = doc.bidder.legal_name if doc.bidder else "Unknown Vendor"
+            vendor_name = doc.bidder.legal_name if doc.bidder else ("Tender Document" if doc.tender_id else "Unknown Vendor")
             effective_status = (doc.ocr_status or doc.status or "UPLOADED").upper()
             return {
                 "id": str(doc.id),
-                "bidder_id": str(doc.bidder_id),
-                "bidderId": str(doc.bidder_id),
+                "bidder_id": str(doc.bidder_id) if doc.bidder_id else None,
+                "bidderId": str(doc.bidder_id) if doc.bidder_id else None,
+                "tender_id": str(doc.tender_id) if doc.tender_id else None,
                 "vendor_name": vendor_name,
                 "document_type": doc.document_type,
                 "type": doc.document_type,

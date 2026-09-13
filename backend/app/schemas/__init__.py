@@ -13,8 +13,11 @@ from .compliance import (
     RequirementEvaluationRead,
     RuleConfigSchema,
     RuleResultSchema,
+    TenderExtractionRequest,
+    TenderExtractionResponse,
     TenderRequirementCreate,
     TenderRequirementRead,
+    TenderRequirementUpdate,
 )
 
 __all__ = [
@@ -35,6 +38,9 @@ __all__ = [
     "RuleConfigSchema",
     "TenderRequirementCreate",
     "TenderRequirementRead",
+    "TenderRequirementUpdate",
+    "TenderExtractionRequest",
+    "TenderExtractionResponse",
     "RuleResultSchema",
     "EvidenceRead",
     "RequirementEvaluationRead",

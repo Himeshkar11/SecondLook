@@ -4,6 +4,34 @@ import uuid
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
+VALID_REQUIREMENT_STATUSES = {
+    "DRAFT",
+    "AI_SUGGESTED",
+    "UNDER_REVIEW",
+    "APPROVED",
+    "REJECTED",
+    "ARCHIVED",
+}
+
+VALID_REQUIREMENT_TYPES = {
+    "GST",
+    "PAN",
+    "UDYAM",
+    "MSME",
+    "FINANCIAL",
+    "EXPERIENCE",
+    "TECHNICAL",
+    "DOCUMENT",
+    "OEM",
+    "MAKE_IN_INDIA",
+    "EPFO",
+    "ESIC",
+    "STARTUP_INDIA",
+    "NSIC",
+    "BLACKLISTING",
+    "OTHER",
+}
+
 
 class RuleConfigSchema(BaseModel):
     source: str = Field(..., description="Evidence source, e.g. GST, PAN")
@@ -13,13 +41,39 @@ class RuleConfigSchema(BaseModel):
 
 
 class TenderRequirementCreate(BaseModel):
-    code: str = Field(..., description="Unique code e.g. REQ-GST-001")
+    code: Optional[str] = Field(None, description="Unique code e.g. REQ-GST-001 (auto-generated if omitted)")
     title: str = Field(..., description="Requirement title")
     description: Optional[str] = None
     type: str = Field("GST", description="Requirement category: GST, PAN, UDYAM, DOCUMENT, etc.")
     mandatory: bool = True
     display_order: int = 1
+    status: str = Field("UNDER_REVIEW", description="Initial status: DRAFT or UNDER_REVIEW")
+    rule_type: Optional[str] = None
+    parameters: Optional[Dict[str, Any]] = None
     rule_config: List[Dict[str, Any]] = Field(default_factory=list)
+    source_document_id: Optional[uuid.UUID] = None
+    source_text: Optional[str] = None
+    source_page: Optional[int] = None
+    source_section: Optional[str] = None
+
+
+class TenderRequirementUpdate(BaseModel):
+    """Schema for updating a tender requirement.
+
+    NOTE: Direct escalation to APPROVED via normal update is strictly rejected by the backend.
+    """
+    title: Optional[str] = None
+    description: Optional[str] = None
+    type: Optional[str] = None
+    mandatory: Optional[bool] = None
+    display_order: Optional[int] = None
+    rule_type: Optional[str] = None
+    parameters: Optional[Dict[str, Any]] = None
+    rule_config: Optional[List[Dict[str, Any]]] = None
+    source_text: Optional[str] = None
+    source_page: Optional[int] = None
+    source_section: Optional[str] = None
+    status: Optional[str] = Field(None, description="Cannot be set to APPROVED via generic update")
 
 
 class TenderRequirementRead(BaseModel):
@@ -31,10 +85,32 @@ class TenderRequirementRead(BaseModel):
     type: str
     mandatory: bool
     display_order: int
+    status: str = "APPROVED"
+    rule_type: Optional[str] = None
+    parameters: Optional[Dict[str, Any]] = None
     rule_config: List[Dict[str, Any]] = Field(default_factory=list)
-    created_at: Optional[str] = None
+    source_document_id: Optional[uuid.UUID] = None
+    source_text: Optional[str] = None
+    source_page: Optional[int] = None
+    source_section: Optional[str] = None
+    created_by: Optional[uuid.UUID] = None
+    approved_by: Optional[uuid.UUID] = None
+    created_at: Optional[Any] = None
+    updated_at: Optional[Any] = None
+    approved_at: Optional[Any] = None
 
     model_config = {"from_attributes": True}
+
+
+class TenderExtractionRequest(BaseModel):
+    text: Optional[str] = Field(None, description="Raw text of the tender to extract from")
+    document_id: Optional[str] = Field(None, description="Document ID of an uploaded tender document")
+
+
+class TenderExtractionResponse(BaseModel):
+    tender_id: str
+    extracted_count: int
+    requirements: List[TenderRequirementRead] = Field(default_factory=list)
 
 
 class RuleResultSchema(BaseModel):

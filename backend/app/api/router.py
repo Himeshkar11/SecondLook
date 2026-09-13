@@ -7,9 +7,10 @@ queries, CRUD, auth, or verification provider calls.
 """
 
 import logging
+from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -27,8 +28,11 @@ from app.services.government_verification_service import (
 from app.services.compliance_service import ComplianceService
 from app.schemas.compliance import (
     BidderComplianceResponse,
+    TenderExtractionRequest,
+    TenderExtractionResponse,
     TenderRequirementCreate,
     TenderRequirementRead,
+    TenderRequirementUpdate,
 )
 from app.services.tender_service import TenderService
 from app.services.verification_service import VerificationService
@@ -215,15 +219,82 @@ def list_bidder_documents(bidder_id: str, page: int = 1, page_size: int = 50, db
         raise HTTPException(status_code=500, detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to list bidder documents", "details": {}}}) from exc
 
 
+@router.post(
+    "/tenders/{tender_id}/documents",
+    tags=["Tenders", "Documents"],
+    summary="Upload a tender document",
+)
+async def upload_tender_document(
+    tender_id: str,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    document_type: str = Form("TENDER_DOCUMENT"),
+    db: Session = Depends(get_db),
+):
+    """Upload a document for a tender and trigger OCR in the background."""
+    service = DocumentService(db=db)
+    try:
+        content = await file.read()
+        res = service.upload_document(
+            tender_id=tender_id,
+            file_bytes=content,
+            file_name=file.filename or "tender_document.pdf",
+            mime_type=file.content_type or "application/pdf",
+            document_type=document_type,
+        )
+
+        doc_id = res["id"]
+
+        def _run_ocr_async(d_id: str, f_bytes: bytes):
+            worker = DocumentOCRWorker()
+            worker.process_document_by_id(d_id, content_override=f_bytes)
+
+        background_tasks.add_task(_run_ocr_async, doc_id, content)
+
+        return res
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": str(exc), "details": {}}}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"error": {"code": "VALIDATION_ERROR", "message": str(exc), "details": {}}}) from exc
+    except Exception as exc:
+        logger.error("Failed to upload tender document: %s", exc)
+        raise HTTPException(status_code=500, detail={"error": {"code": "UPLOAD_FAILED", "message": "Failed to upload tender document", "details": {}}}) from exc
+
+
+@router.get(
+    "/tenders/{tender_id}/documents",
+    tags=["Tenders", "Documents"],
+    summary="List tender documents",
+)
+def list_tender_documents(
+    tender_id: str,
+    page: int = 1,
+    page_size: int = 50,
+    db: Session = Depends(get_db),
+):
+    """List all documents associated with a tender."""
+    service = DocumentService(db=db)
+    try:
+        return service.list_documents(tender_id=tender_id, page=page, page_size=page_size)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to list tender documents", "details": {}}}) from exc
+
+
 @router.get("/documents", tags=["Documents"], summary="List all documents", responses={
     200: {"description": "List of all documents."},
     500: {"description": "Database query error."}
 })
-def list_all_documents(bidder_id: str | None = None, page: int = 1, page_size: int = 50, db: Session = Depends(get_db)):
-    """List documents across all bidders or filter by bidder_id."""
+def list_all_documents(
+    bidder_id: str | None = None,
+    tender_id: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+    db: Session = Depends(get_db),
+):
+    """List documents across all entities or filter by bidder_id / tender_id."""
     service = DocumentService(db=db)
     try:
-        return service.list_documents(bidder_id=bidder_id, page=page, page_size=page_size)
+        return service.list_documents(bidder_id=bidder_id, tender_id=tender_id, page=page, page_size=page_size)
     except Exception as exc:
         raise HTTPException(status_code=500, detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to list documents", "details": {}}}) from exc
 
@@ -487,32 +558,48 @@ def get_audit(id: UUID):
 # ============================================================================
 
 
+def _to_requirement_read(r) -> TenderRequirementRead:
+    return TenderRequirementRead(
+        id=r.id,
+        tender_id=r.tender_id,
+        code=r.code,
+        title=r.title,
+        description=r.description,
+        type=r.type,
+        mandatory=r.mandatory,
+        display_order=r.display_order,
+        status=getattr(r, "status", "APPROVED"),
+        rule_type=getattr(r, "rule_type", None),
+        parameters=getattr(r, "parameters", None),
+        rule_config=r.rule_config if isinstance(r.rule_config, list) else [r.rule_config] if r.rule_config else [],
+        source_document_id=getattr(r, "source_document_id", None),
+        source_text=getattr(r, "source_text", None),
+        source_page=getattr(r, "source_page", None),
+        source_section=getattr(r, "source_section", None),
+        created_by=getattr(r, "created_by", None),
+        approved_by=getattr(r, "approved_by", None),
+        created_at=r.created_at.isoformat() if hasattr(r.created_at, "isoformat") else r.created_at,
+        updated_at=r.updated_at.isoformat() if hasattr(r.updated_at, "isoformat") else r.updated_at,
+        approved_at=r.approved_at.isoformat() if hasattr(r.approved_at, "isoformat") else r.approved_at,
+    )
+
+
 @router.get(
     "/tenders/{tender_id}/requirements",
     response_model=list[TenderRequirementRead],
     tags=["Compliance"],
     summary="Get statutory requirements for a tender",
 )
-def get_tender_requirements(tender_id: str, db: Session = Depends(get_db)):
-    """Fetch statutory requirements defined for a tender."""
+def get_tender_requirements(
+    tender_id: str,
+    status: Optional[str] = Query(None, description="Filter by requirement status"),
+    db: Session = Depends(get_db),
+):
+    """Fetch statutory requirements defined for a tender, optionally filtered by status."""
     service = ComplianceService(db=db)
     try:
-        reqs = service.get_tender_requirements(tender_id)
-        return [
-            TenderRequirementRead(
-                id=r.id,
-                tender_id=r.tender_id,
-                code=r.code,
-                title=r.title,
-                description=r.description,
-                type=r.type,
-                mandatory=r.mandatory,
-                display_order=r.display_order,
-                rule_config=r.rule_config if isinstance(r.rule_config, list) else [r.rule_config],
-                created_at=r.created_at.isoformat() if r.created_at else None,
-            )
-            for r in reqs
-        ]
+        reqs = service.get_tender_requirements(tender_id, status=status)
+        return [_to_requirement_read(r) for r in reqs]
     except Exception as exc:
         logger.error("Failed to load tender requirements: %s", exc)
         raise HTTPException(
@@ -532,27 +619,186 @@ def create_tender_requirement(
     payload: TenderRequirementCreate,
     db: Session = Depends(get_db),
 ):
-    """Add a new statutory requirement to a tender."""
+    """Add a new requirement to a tender. Initial status is UNDER_REVIEW or DRAFT."""
     service = ComplianceService(db=db)
     try:
         r = service.create_tender_requirement(tender_id, payload)
-        return TenderRequirementRead(
-            id=r.id,
-            tender_id=r.tender_id,
-            code=r.code,
-            title=r.title,
-            description=r.description,
-            type=r.type,
-            mandatory=r.mandatory,
-            display_order=r.display_order,
-            rule_config=r.rule_config if isinstance(r.rule_config, list) else [r.rule_config],
-            created_at=r.created_at.isoformat() if r.created_at else None,
-        )
+        return _to_requirement_read(r)
     except Exception as exc:
         logger.error("Failed to create tender requirement: %s", exc)
         raise HTTPException(
             status_code=500,
             detail={"error": {"code": "CREATION_FAILED", "message": str(exc), "details": {}}},
+        ) from exc
+
+
+@router.post(
+    "/tenders/{tender_id}/requirements/extract",
+    response_model=TenderExtractionResponse,
+    tags=["Compliance"],
+    summary="Extract requirements from tender text or document using AI",
+)
+def extract_tender_requirements(
+    tender_id: str,
+    payload: TenderExtractionRequest = Body(...),
+    db: Session = Depends(get_db),
+):
+    """Extract candidate requirements from tender document or text.
+    
+    All candidates are saved with status AI_SUGGESTED and must be reviewed and approved
+    by a procurement officer before entering the Compliance Engine.
+    """
+    service = ComplianceService(db=db)
+    try:
+        reqs = service.extract_tender_requirements(
+            tender_id=tender_id,
+            text=payload.text,
+            document_id=payload.document_id,
+        )
+        return TenderExtractionResponse(
+            tender_id=tender_id,
+            extracted_count=len(reqs),
+            requirements=[_to_requirement_read(r) for r in reqs],
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": str(exc), "details": {}}},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"code": "EXTRACTION_FAILED", "message": str(exc), "details": {}}},
+        ) from exc
+    except Exception as exc:
+        logger.error("Failed to extract tender requirements: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "EXTRACTION_ERROR", "message": str(exc), "details": {}}},
+        ) from exc
+
+
+@router.get(
+    "/tender-requirements/{requirement_id}",
+    response_model=TenderRequirementRead,
+    tags=["Compliance"],
+    summary="Get single tender requirement by ID",
+)
+def get_single_tender_requirement(
+    requirement_id: str,
+    db: Session = Depends(get_db),
+):
+    """Retrieve a single requirement by ID."""
+    service = ComplianceService(db=db)
+    req = service.get_tender_requirement(requirement_id)
+    if req is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": f"Requirement {requirement_id} not found", "details": {}}},
+        )
+    return _to_requirement_read(req)
+
+
+@router.patch(
+    "/tender-requirements/{requirement_id}",
+    response_model=TenderRequirementRead,
+    tags=["Compliance"],
+    summary="Update a tender requirement",
+)
+def update_tender_requirement(
+    requirement_id: str,
+    payload: TenderRequirementUpdate = Body(...),
+    db: Session = Depends(get_db),
+):
+    """Update requirement parameters.
+    
+    Direct escalation to APPROVED is rejected.
+    Modifying an APPROVED requirement demotes it to UNDER_REVIEW.
+    """
+    service = ComplianceService(db=db)
+    try:
+        r = service.update_tender_requirement(requirement_id, payload)
+        return _to_requirement_read(r)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": str(exc), "details": {}}},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "INVALID_TRANSITION", "message": str(exc), "details": {}}},
+        ) from exc
+    except Exception as exc:
+        logger.error("Failed to update tender requirement: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "UPDATE_FAILED", "message": str(exc), "details": {}}},
+        ) from exc
+
+
+@router.post(
+    "/tender-requirements/{requirement_id}/approve",
+    response_model=TenderRequirementRead,
+    tags=["Compliance"],
+    summary="Approve a tender requirement",
+)
+def approve_tender_requirement(
+    requirement_id: str,
+    payload: dict = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+):
+    """Explicitly approve a requirement by a procurement officer."""
+    officer_id = payload.get("officer_id") if isinstance(payload, dict) else None
+    service = ComplianceService(db=db)
+    try:
+        r = service.approve_requirement(requirement_id, officer_id=officer_id)
+        return _to_requirement_read(r)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": str(exc), "details": {}}},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "APPROVAL_ERROR", "message": str(exc), "details": {}}},
+        ) from exc
+    except Exception as exc:
+        logger.error("Failed to approve tender requirement: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "APPROVAL_FAILED", "message": str(exc), "details": {}}},
+        ) from exc
+
+
+@router.post(
+    "/tender-requirements/{requirement_id}/reject",
+    response_model=TenderRequirementRead,
+    tags=["Compliance"],
+    summary="Reject a tender requirement",
+)
+def reject_tender_requirement(
+    requirement_id: str,
+    payload: dict = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+):
+    """Reject a requirement candidate."""
+    reason = payload.get("reason") if isinstance(payload, dict) else None
+    service = ComplianceService(db=db)
+    try:
+        r = service.reject_requirement(requirement_id, reason=reason)
+        return _to_requirement_read(r)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": str(exc), "details": {}}},
+        ) from exc
+    except Exception as exc:
+        logger.error("Failed to reject tender requirement: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "REJECTION_FAILED", "message": str(exc), "details": {}}},
         ) from exc
 
 

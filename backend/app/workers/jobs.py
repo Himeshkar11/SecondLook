@@ -84,7 +84,8 @@ class DocumentOCRJobRecord(BaseModel):
 
     job_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     document_id: str = Field(..., description="Document identifier")
-    bidder_id: str = Field(..., description="Bidder or vendor identifier")
+    bidder_id: Optional[str] = Field(None, description="Bidder or vendor identifier")
+    tender_id: Optional[str] = Field(None, description="Tender identifier")
     storage_path: Optional[str] = Field(None, description="Path to file in storage")
     file_name: str = Field(default="document.pdf", description="Original file name")
     mime_type: Optional[str] = Field(default="application/pdf", description="MIME type")

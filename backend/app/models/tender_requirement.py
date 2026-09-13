@@ -24,11 +24,26 @@ class TenderRequirement(Base):
     type: Mapped[str] = mapped_column(String(50), nullable=False, default="GST")  # GST, PAN, UDYAM, DOCUMENT, etc.
     mandatory: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="APPROVED")  # DRAFT, AI_SUGGESTED, UNDER_REVIEW, APPROVED, REJECTED, ARCHIVED
+    rule_type: Mapped[str | None] = mapped_column(String(50), nullable=True)  # STATUS_EQUALS, FIELD_EQUALS, etc.
+    parameters: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    source_document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
+    source_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_section: Mapped[str | None] = mapped_column(String(255), nullable=True)
     rule_config: Mapped[list | dict] = mapped_column(JSON, nullable=False, default=list)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    approved_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     tender: Mapped["Tender"] = relationship("Tender", back_populates="requirements")
+    source_document: Mapped["Document | None"] = relationship("Document", foreign_keys=[source_document_id])
+    creator: Mapped["User | None"] = relationship("User", foreign_keys=[created_by])
+    approver: Mapped["User | None"] = relationship("User", foreign_keys=[approved_by])
     evaluations: Mapped[list["RequirementEvaluation"]] = relationship("RequirementEvaluation", back_populates="requirement", cascade="all, delete-orphan")
+
 
 
 class RequirementEvaluation(Base):
