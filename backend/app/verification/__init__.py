@@ -34,6 +34,10 @@ from app.verification.compliance_engine import (
     RequirementResult,
     RuleResult,
 )
+from app.verification.evidence_resolver import (
+    EvidenceResolver,
+    ResolvedEvidenceTrace,
+)
 
 __all__ = [
     "Rule",
@@ -56,4 +60,6 @@ __all__ = [
     "Evidence",
     "RuleResult",
     "RequirementResult",
+    "EvidenceResolver",
+    "ResolvedEvidenceTrace",
 ]

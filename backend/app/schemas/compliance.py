@@ -134,6 +134,7 @@ class EvidenceRead(BaseModel):
 
 class RequirementEvaluationRead(BaseModel):
     id: Optional[uuid.UUID] = None
+    evaluation_id: Optional[uuid.UUID] = None
     requirement_id: uuid.UUID
     bidder_id: uuid.UUID
     tender_id: uuid.UUID
@@ -159,6 +160,12 @@ class ComplianceSummary(BaseModel):
     not_applicable_count: int = 0
     mandatory_failed: int = 0
     mandatory_not_verified: int = 0
+    mandatory_total: int = 0
+    mandatory_passed: int = 0
+    optional_total: int = 0
+    optional_passed: int = 0
+    optional_failed: int = 0
+    optional_not_verified: int = 0
 
 
 DEFAULT_COMPLIANCE_DISCLAIMER = (
@@ -170,9 +177,39 @@ DEFAULT_COMPLIANCE_DISCLAIMER = (
 
 
 class BidderComplianceResponse(BaseModel):
+    evaluation_id: Optional[str] = None
     tender_id: str
     bidder_id: str
     bidder_legal_name: Optional[str] = None
     summary: ComplianceSummary
     requirements: List[RequirementEvaluationRead] = Field(default_factory=list)
     disclaimer: str = DEFAULT_COMPLIANCE_DISCLAIMER
+
+
+class ComplianceEvaluationRead(BaseModel):
+    evaluation_id: uuid.UUID
+    tender_id: uuid.UUID
+    bidder_id: uuid.UUID
+    bidder_legal_name: Optional[str] = None
+    tender_title: Optional[str] = None
+    status: str = "COMPLETED"  # PENDING, PROCESSING, COMPLETED, FAILED
+    summary: ComplianceSummary
+    requirements: List[RequirementEvaluationRead] = Field(default_factory=list)
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    created_at: Optional[str] = None
+    disclaimer: str = DEFAULT_COMPLIANCE_DISCLAIMER
+
+    model_config = {"from_attributes": True}
+
+
+class ComplianceEvaluationSummaryItem(BaseModel):
+    evaluation_id: uuid.UUID
+    tender_id: uuid.UUID
+    bidder_id: uuid.UUID
+    status: str
+    summary: Optional[Dict[str, Any]] = None
+    created_at: str
+    completed_at: Optional[str] = None
+
+    model_config = {"from_attributes": True}

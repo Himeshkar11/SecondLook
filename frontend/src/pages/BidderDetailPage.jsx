@@ -1,12 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import PageContainer from '../components/layout/PageContainer.jsx';
 import Badge from '../components/common/Badge.jsx';
 import Button from '../components/common/Button.jsx';
 import Loading from '../components/common/Loading.jsx';
 import EmptyState from '../components/common/EmptyState.jsx';
 import { getBidderById } from '../services/bidderService.js';
-import { getBidderCompliance, evaluateBidderCompliance } from '../services/complianceService.js';
+import {
+  getBidderCompliance,
+  evaluateBidderCompliance,
+  runComplianceEvaluation,
+  getComplianceEvaluation,
+  getComplianceEvaluationsHistory,
+} from '../services/complianceService.js';
 
 /**
  * BidderDetailPage — Dynamic Supabase-backed bidder profile.
@@ -15,6 +21,8 @@ import { getBidderCompliance, evaluateBidderCompliance } from '../services/compl
 export default function BidderDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const paramTenderId = searchParams.get('tender_id');
   const bidderId = decodeURIComponent(id || '');
 
   const [bidder, setBidder] = useState(null);
@@ -24,6 +32,17 @@ export default function BidderDetailPage() {
   const [compliance, setCompliance] = useState(null);
   const [complianceLoading, setComplianceLoading] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
+  const [evalError, setEvalError] = useState(null);
+  const [evaluationsHistory, setEvaluationsHistory] = useState([]);
+  const [selectedEvalId, setSelectedEvalId] = useState(null);
+  const [expandedReqs, setExpandedReqs] = useState({});
+
+  const toggleReqExpand = (reqKey) => {
+    setExpandedReqs((prev) => ({
+      ...prev,
+      [reqKey]: !prev[reqKey],
+    }));
+  };
 
   const fetchBidderDetails = useCallback(async () => {
     if (!bidderId) {
@@ -37,17 +56,34 @@ export default function BidderDetailPage() {
     setNotFound(false);
     setBidder(null);
     setCompliance(null);
+    setEvalError(null);
+    setEvaluationsHistory([]);
 
     try {
       const data = await getBidderById(bidderId);
       setBidder(data);
 
-      const tid = data?.tender_id || (data?.tenders && data.tenders[0]?.id) || data?.tenderId;
+      const tid = paramTenderId || data?.tender_id || (data?.tenders && data.tenders[0]?.id) || data?.tenderId;
       if (tid) {
         setComplianceLoading(true);
         try {
-          const compData = await getBidderCompliance(bidderId, tid);
-          setCompliance(compData);
+          // Fetch evaluation history
+          const history = await getComplianceEvaluationsHistory(tid, bidderId).catch(() => []);
+          const historyList = Array.isArray(history) ? history : [];
+          setEvaluationsHistory(historyList);
+
+          if (historyList.length > 0) {
+            setSelectedEvalId(historyList[0].evaluation_id);
+            const fullEval = await getComplianceEvaluation(historyList[0].evaluation_id);
+            setCompliance(fullEval);
+          } else {
+            // Fallback to latest or initial compliance
+            const compData = await getBidderCompliance(bidderId, tid);
+            setCompliance(compData);
+            if (compData?.evaluation_id) {
+              setSelectedEvalId(compData.evaluation_id);
+            }
+          }
         } catch (cErr) {
           console.error('Failed to load compliance data:', cErr);
           setCompliance(null);
@@ -64,17 +100,45 @@ export default function BidderDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [bidderId]);
+  }, [bidderId, paramTenderId]);
+
+  const handleSelectEvaluation = async (evalId) => {
+    if (!evalId || evalId === selectedEvalId) return;
+    setSelectedEvalId(evalId);
+    setComplianceLoading(true);
+    setEvalError(null);
+    try {
+      const fullEval = await getComplianceEvaluation(evalId);
+      setCompliance(fullEval);
+    } catch (err) {
+      console.error('Failed to load evaluation run:', err);
+      setEvalError('Failed to load historical evaluation details.');
+    } finally {
+      setComplianceLoading(false);
+    }
+  };
 
   const handleRunEvaluation = async () => {
-    const tid = bidder?.tender_id || (bidder?.tenders && bidder.tenders[0]?.id) || bidder?.tenderId;
+    const tid = paramTenderId || bidder?.tender_id || (bidder?.tenders && bidder.tenders[0]?.id) || bidder?.tenderId;
     if (!tid) return;
     setEvaluating(true);
+    setEvalError(null);
     try {
-      const compData = await evaluateBidderCompliance(bidderId, tid);
+      const compData = await runComplianceEvaluation(tid, bidderId);
       setCompliance(compData);
+      setSelectedEvalId(compData.evaluation_id);
+
+      // Refresh audit history
+      const history = await getComplianceEvaluationsHistory(tid, bidderId).catch(() => []);
+      const historyList = Array.isArray(history) ? history : [];
+      setEvaluationsHistory(historyList);
     } catch (err) {
       console.error('Compliance evaluation error:', err);
+      if (err?.status === 400 && (err?.message?.includes('NO_APPROVED_REQUIREMENTS') || err?.message?.includes('No approved'))) {
+        setEvalError('No approved tender requirements are available for evaluation.');
+      } else {
+        setEvalError(err?.message || 'Compliance evaluation failed.');
+      }
     } finally {
       setEvaluating(false);
     }
@@ -324,7 +388,7 @@ export default function BidderDetailPage() {
         </div>
       </div>
 
-      {/* Statutory Compliance Verification (Task 11) */}
+      {/* Statutory Compliance Verification (Task 13 Multi-Source Orchestration) */}
       <div
         style={{
           backgroundColor: 'var(--color-bg-card)',
@@ -348,28 +412,52 @@ export default function BidderDetailPage() {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
               <h3 style={{ fontSize: 'var(--font-size-base)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-primary)', margin: 0 }}>
-                Statutory Compliance Verification
+                Multi-Source Statutory Compliance Pipeline
               </h3>
-              <Badge variant="neutral">Layer 3: Rules Engine</Badge>
+              <Badge variant="neutral">Task 13 Orchestration</Badge>
             </div>
             <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: '2px', marginBottom: 0 }}>
-              Deterministic requirement evaluation against government-verified evidence
+              Deterministic evaluation of approved tender requirements against multi-source evidence
             </p>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+            {evaluationsHistory.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Run:</span>
+                <select
+                  value={selectedEvalId || ''}
+                  onChange={(e) => handleSelectEvaluation(e.target.value)}
+                  disabled={evaluating || complianceLoading}
+                  style={{
+                    padding: '4px 8px',
+                    fontSize: 'var(--font-size-xs)',
+                    borderRadius: 'var(--radius-xs)',
+                    border: '1px solid var(--color-border)',
+                    backgroundColor: 'var(--color-bg-card)',
+                    color: 'var(--color-text-primary)',
+                  }}
+                >
+                  {evaluationsHistory.map((item, idx) => (
+                    <option key={item.evaluation_id} value={item.evaluation_id}>
+                      Run #{evaluationsHistory.length - idx} ({new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}) — {item.status}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <Button
-              variant="secondary"
+              variant="primary"
               size="sm"
               onClick={handleRunEvaluation}
               disabled={evaluating || complianceLoading}
             >
-              {evaluating ? 'Evaluating…' : '↻ Re-evaluate Compliance'}
+              {evaluating ? 'Evaluating…' : '↻ Run Compliance Evaluation'}
             </Button>
           </div>
         </div>
 
-        {/* Disclaimer banner */}
+        {/* Disclaimer & Factual Notice */}
         <div
           style={{
             backgroundColor: 'var(--color-bg-subtle)',
@@ -384,51 +472,102 @@ export default function BidderDetailPage() {
         >
           <span>⚖️</span>
           <span>
-            <strong>Statutory Notice:</strong> Automated factual verification of individual statutory requirements based on verified evidence. Final procurement determinations are made solely by the procurement officer.
+            <strong>Statutory Notice:</strong> Automated factual verification of individual requirements. Final procurement determinations remain strictly under human officer control.
           </span>
         </div>
 
-        {/* Compliance metrics overview */}
-        {compliance && compliance.summary && (
+        {/* Evaluation Error Banner (e.g. NO_APPROVED_REQUIREMENTS) */}
+        {evalError && (
           <div
             style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-              gap: 'var(--space-3)',
-              padding: 'var(--space-4) var(--space-5)',
-              borderBottom: '1px solid var(--color-border-subtle)',
-              backgroundColor: 'var(--color-bg-card)',
+              padding: 'var(--space-3) var(--space-5)',
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              borderBottom: '1px solid var(--color-danger)',
+              color: 'var(--color-danger)',
+              fontSize: 'var(--font-size-sm)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
             }}
           >
-            <div style={{ textAlign: 'center', padding: 'var(--space-2)', backgroundColor: 'var(--color-bg-subtle)', borderRadius: 'var(--radius-sm)' }}>
-              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Requirements</div>
-              <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-text-primary)' }}>
-                {compliance.summary.total_requirements}
+            <span>⚠️</span>
+            <span>{evalError}</span>
+          </div>
+        )}
+
+        {/* Compliance metrics overview */}
+        {compliance && compliance.summary && (
+          <div style={{ borderBottom: '1px solid var(--color-border-subtle)', backgroundColor: 'var(--color-bg-card)' }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                gap: 'var(--space-3)',
+                padding: 'var(--space-4) var(--space-5)',
+              }}
+            >
+              <div style={{ textAlign: 'center', padding: 'var(--space-2)', backgroundColor: 'var(--color-bg-subtle)', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Total Requirements</div>
+                <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-text-primary)' }}>
+                  {compliance.summary.total_requirements}
+                </div>
+              </div>
+              <div style={{ textAlign: 'center', padding: 'var(--space-2)', backgroundColor: 'var(--color-bg-subtle)', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-success)', textTransform: 'uppercase' }}>Pass</div>
+                <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-success)' }}>
+                  {compliance.summary.pass_count}
+                </div>
+              </div>
+              <div style={{ textAlign: 'center', padding: 'var(--space-2)', backgroundColor: 'var(--color-bg-subtle)', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-danger)', textTransform: 'uppercase' }}>Fail</div>
+                <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-danger)' }}>
+                  {compliance.summary.fail_count}
+                </div>
+              </div>
+              <div style={{ textAlign: 'center', padding: 'var(--space-2)', backgroundColor: 'var(--color-bg-subtle)', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Not Verified</div>
+                <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-text-secondary)' }}>
+                  {compliance.summary.not_verified_count}
+                </div>
+              </div>
+              <div style={{ textAlign: 'center', padding: 'var(--space-2)', backgroundColor: 'var(--color-bg-subtle)', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-warning)', textTransform: 'uppercase' }}>Partial</div>
+                <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-warning)' }}>
+                  {compliance.summary.partial_count}
+                </div>
               </div>
             </div>
-            <div style={{ textAlign: 'center', padding: 'var(--space-2)', backgroundColor: 'var(--color-bg-subtle)', borderRadius: 'var(--radius-sm)' }}>
-              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-success)', textTransform: 'uppercase' }}>Pass</div>
-              <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-success)' }}>
-                {compliance.summary.pass_count}
+
+            {/* Mandatory vs Optional Breakdown Sub-bar */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                padding: 'var(--space-2) var(--space-5)',
+                backgroundColor: 'var(--color-bg-subtle)',
+                fontSize: 'var(--font-size-xs)',
+                color: 'var(--color-text-secondary)',
+                flexWrap: 'wrap',
+                gap: 'var(--space-2)',
+              }}
+            >
+              <div>
+                <strong>Mandatory ({compliance.summary.mandatory_total}):</strong>{' '}
+                <span style={{ color: 'var(--color-success)' }}>{compliance.summary.mandatory_passed} Passed</span>,{' '}
+                <span style={{ color: 'var(--color-danger)' }}>{compliance.summary.mandatory_failed} Failed</span>,{' '}
+                <span style={{ color: 'var(--color-text-muted)' }}>{compliance.summary.mandatory_not_verified} Not Verified</span>
               </div>
-            </div>
-            <div style={{ textAlign: 'center', padding: 'var(--space-2)', backgroundColor: 'var(--color-bg-subtle)', borderRadius: 'var(--radius-sm)' }}>
-              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-danger)', textTransform: 'uppercase' }}>Fail</div>
-              <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-danger)' }}>
-                {compliance.summary.fail_count}
+              <div>
+                <strong>Optional ({compliance.summary.optional_total}):</strong>{' '}
+                <span style={{ color: 'var(--color-success)' }}>{compliance.summary.optional_passed} Passed</span>,{' '}
+                <span style={{ color: 'var(--color-danger)' }}>{compliance.summary.optional_failed} Failed</span>,{' '}
+                <span style={{ color: 'var(--color-text-muted)' }}>{compliance.summary.optional_not_verified} Not Verified</span>
               </div>
-            </div>
-            <div style={{ textAlign: 'center', padding: 'var(--space-2)', backgroundColor: 'var(--color-bg-subtle)', borderRadius: 'var(--radius-sm)' }}>
-              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-warning)', textTransform: 'uppercase' }}>Partial</div>
-              <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-warning)' }}>
-                {compliance.summary.partial_count}
-              </div>
-            </div>
-            <div style={{ textAlign: 'center', padding: 'var(--space-2)', backgroundColor: 'var(--color-bg-subtle)', borderRadius: 'var(--radius-sm)' }}>
-              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Not Verified</div>
-              <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-text-secondary)' }}>
-                {compliance.summary.not_verified_count}
-              </div>
+              {compliance.evaluation_id && (
+                <div style={{ fontFamily: 'var(--font-family-mono)', color: 'var(--color-text-muted)' }}>
+                  Run ID: {String(compliance.evaluation_id).slice(0, 8)}…
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -436,7 +575,7 @@ export default function BidderDetailPage() {
         {/* Requirements list */}
         {complianceLoading ? (
           <div style={{ padding: 'var(--space-6)' }}>
-            <Loading message="Evaluating statutory compliance..." size="sm" />
+            <Loading message="Running compliance pipeline..." size="sm" />
           </div>
         ) : !compliance || !compliance.requirements || compliance.requirements.length === 0 ? (
           <div style={{ padding: 'var(--space-6)', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
@@ -457,120 +596,248 @@ export default function BidderDetailPage() {
             </button>
           </div>
         ) : (
-          <div style={{ padding: 'var(--space-4) var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-            {compliance.requirements.map((req) => (
-              <div
-                key={req.requirement_id || req.requirement_code}
-                style={{
-                  border: '1px solid var(--color-border-subtle)',
-                  borderRadius: 'var(--radius-sm)',
-                  padding: 'var(--space-4)',
-                  backgroundColor: 'var(--color-bg-subtle)',
-                }}
-              >
-                {/* Requirement header */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                    <span style={{ fontFamily: 'var(--font-family-mono)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-primary)', fontSize: 'var(--font-size-sm)' }}>
-                      {req.requirement_code}
-                    </span>
-                    <span style={{ fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-sm)' }}>
-                      {req.requirement_title}
-                    </span>
-                    {req.mandatory && <Badge variant="warning">Mandatory</Badge>}
-                  </div>
-                  <div>
-                    {getComplianceStatusBadge(req.status)}
-                  </div>
-                </div>
+          <div style={{ padding: 'var(--space-4) var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+            {/* Status notice */}
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', fontStyle: 'italic' }}>
+              Compliance assessment completed. Click any requirement below to inspect multi-source traceable evidence.
+            </div>
 
-                {/* Explanation */}
-                {req.result?.summary && (
-                  <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-3)' }}>
-                    {req.result.summary}
-                  </p>
-                )}
+            {/* Render helper function inline */}
+            {(() => {
+              const reqs = compliance.requirements || [];
+              const mandatoryList = reqs.filter((r) => r.mandatory);
+              const optionalList = reqs.filter((r) => !r.mandatory);
 
-                {/* Rule-level breakdown */}
-                {req.rule_results && req.rule_results.length > 0 && (
-                  <div style={{ marginTop: 'var(--space-2)', borderTop: '1px solid var(--color-border-subtle)', paddingTop: 'var(--space-2)' }}>
-                    <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: 'var(--space-1)' }}>
-                      Rule Criteria Breakdown
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-                      {req.rule_results.map((rr, idx) => (
-                        <div
-                          key={idx}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            fontSize: 'var(--font-size-xs)',
-                            padding: 'var(--space-1) var(--space-2)',
-                            backgroundColor: 'var(--color-bg-card)',
-                            borderRadius: 'var(--radius-xs)',
-                          }}
-                        >
-                          <span style={{ fontFamily: 'var(--font-family-mono)', color: 'var(--color-text-primary)' }}>
-                            {rr.field} ({rr.operator}): {rr.expected != null ? `expected "${rr.expected}", ` : ''}actual "{rr.actual ?? 'NONE'}"
-                          </span>
-                          <span>
-                            {rr.status === 'PASS' ? (
-                              <span style={{ color: 'var(--color-success)', fontWeight: 'var(--font-weight-bold)' }}>✓ PASS</span>
-                            ) : rr.status === 'FAIL' ? (
-                              <span style={{ color: 'var(--color-danger)', fontWeight: 'var(--font-weight-bold)' }}>✗ FAIL</span>
-                            ) : (
-                              <span style={{ color: 'var(--color-text-muted)' }}>— NOT VERIFIED</span>
-                            )}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+              const renderRequirementCard = (req) => {
+                const reqKey = req.requirement_id || req.requirement_code;
+                const isExpanded = expandedReqs[reqKey] ?? true;
 
-                {/* Traceable Evidence links */}
-                {req.evidence && req.evidence.length > 0 && (
-                  <div style={{ marginTop: 'var(--space-2)', borderTop: '1px solid var(--color-border-subtle)', paddingTop: 'var(--space-2)' }}>
-                    <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: 'var(--space-1)' }}>
-                      Traceable Evidence
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-                      {req.evidence.map((ev, i) => (
-                        <span
-                          key={i}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 'var(--space-1)',
-                            fontSize: 'var(--font-size-xs)',
-                            fontFamily: 'var(--font-family-mono)',
-                            padding: '2px 6px',
-                            backgroundColor: 'var(--color-bg-card)',
-                            border: '1px solid var(--color-border-subtle)',
-                            borderRadius: 'var(--radius-xs)',
-                          }}
-                        >
-                          <span>🏛 {ev.source}:</span>
-                          <strong>{ev.identifier || 'Record'}</strong>
-                          {ev.verified ? (
-                            <span style={{ color: 'var(--color-success)' }}>✓ Verified</span>
-                          ) : (
-                            <span style={{ color: 'var(--color-warning)' }}>⚠️ Unverified</span>
-                          )}
-                          {ev.document_id && (
-                            <span style={{ color: 'var(--color-text-muted)' }}>(Doc: {ev.document_id.slice(0, 8)}…)</span>
-                          )}
+                // Detect AI-only vs unverified vs conflict
+                const hasGovEvidence = (req.evidence || []).some((ev) => ev.verified || (ev.source && ev.source.includes('GOVERNMENT')));
+                const hasAiEvidence = (req.evidence || []).some((ev) => ev.ai_extracted && Object.keys(ev.ai_extracted).length > 0);
+                const hasConflict = (req.evidence || []).some((ev) => ev.conflict_detected);
+
+                let notVerifiedMsg = 'Required verification evidence is unavailable.';
+                if (req.status === 'NOT_VERIFIED') {
+                  if (hasAiEvidence && !hasGovEvidence) {
+                    notVerifiedMsg = 'Information was extracted from the submitted document, but required government verification is unavailable.';
+                  } else {
+                    notVerifiedMsg = 'Verification evidence unavailable.';
+                  }
+                }
+
+                return (
+                  <div
+                    key={reqKey}
+                    style={{
+                      border: '1px solid var(--color-border-subtle)',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: 'var(--space-4)',
+                      backgroundColor: 'var(--color-bg-subtle)',
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => toggleReqExpand(reqKey)}
+                  >
+                    {/* Header */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                        <span style={{ fontFamily: 'var(--font-family-mono)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-primary)', fontSize: 'var(--font-size-sm)' }}>
+                          {req.requirement_code}
                         </span>
-                      ))}
+                        <span style={{ fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-sm)' }}>
+                          {req.requirement_title}
+                        </span>
+                        {req.mandatory ? <Badge variant="warning">Mandatory</Badge> : <Badge variant="neutral">Optional</Badge>}
+                        {req.requirement_type && <Badge variant="neutral">{req.requirement_type}</Badge>}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                        {getComplianceStatusBadge(req.status)}
+                        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+                          {isExpanded ? '▲' : '▼'}
+                        </span>
+                      </div>
                     </div>
+
+                    {/* Explanation */}
+                    {req.result?.summary && (
+                      <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', margin: 'var(--space-1) 0 var(--space-2) 0' }}>
+                        {req.result.summary}
+                      </p>
+                    )}
+
+                    {/* Special NOT_VERIFIED guidance */}
+                    {req.status === 'NOT_VERIFIED' && (
+                      <div
+                        style={{
+                          padding: 'var(--space-2) var(--space-3)',
+                          backgroundColor: 'var(--color-bg-card)',
+                          borderLeft: '3px solid var(--color-text-muted)',
+                          borderRadius: 'var(--radius-xs)',
+                          fontSize: 'var(--font-size-xs)',
+                          color: 'var(--color-text-secondary)',
+                          marginBottom: 'var(--space-2)',
+                        }}
+                      >
+                        ℹ️ {notVerifiedMsg}
+                      </div>
+                    )}
+
+                    {/* Evidence Conflict Alert */}
+                    {hasConflict && (
+                      <div
+                        style={{
+                          padding: 'var(--space-2) var(--space-3)',
+                          backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                          borderLeft: '3px solid var(--color-danger)',
+                          borderRadius: 'var(--radius-xs)',
+                          fontSize: 'var(--font-size-xs)',
+                          color: 'var(--color-danger)',
+                          marginBottom: 'var(--space-2)',
+                        }}
+                      >
+                        ⚠️ <strong>Evidence Conflict Detected:</strong> Government registry data differs from document AI extraction. Government-verified evidence took precedence. Both records are preserved below.
+                      </div>
+                    )}
+
+                    {/* Expanded Detail View */}
+                    {isExpanded && (
+                      <div style={{ marginTop: 'var(--space-3)', borderTop: '1px solid var(--color-border-subtle)', paddingTop: 'var(--space-3)' }}>
+                        {/* Rule-level breakdown */}
+                        {req.rule_results && req.rule_results.length > 0 && (
+                          <div style={{ marginBottom: 'var(--space-3)' }}>
+                            <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: 'var(--space-1)' }}>
+                              Rule Criteria Evaluation
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+                              {req.rule_results.map((rr, idx) => (
+                                <div
+                                  key={idx}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    fontSize: 'var(--font-size-xs)',
+                                    padding: 'var(--space-1) var(--space-2)',
+                                    backgroundColor: 'var(--color-bg-card)',
+                                    borderRadius: 'var(--radius-xs)',
+                                  }}
+                                >
+                                  <span style={{ fontFamily: 'var(--font-family-mono)', color: 'var(--color-text-primary)' }}>
+                                    {rr.field} ({rr.operator}): {rr.expected != null ? `expected "${rr.expected}", ` : ''}actual "{rr.actual ?? 'NONE'}"
+                                  </span>
+                                  <span>
+                                    {rr.status === 'PASS' ? (
+                                      <span style={{ color: 'var(--color-success)', fontWeight: 'var(--font-weight-bold)' }}>✓ PASS</span>
+                                    ) : rr.status === 'FAIL' ? (
+                                      <span style={{ color: 'var(--color-danger)', fontWeight: 'var(--font-weight-bold)' }}>✗ FAIL</span>
+                                    ) : (
+                                      <span style={{ color: 'var(--color-text-muted)' }}>— NOT VERIFIED</span>
+                                    )}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Multi-Source Traceable Evidence links */}
+                        {req.evidence && req.evidence.length > 0 && (
+                          <div>
+                            <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: 'var(--space-1)' }}>
+                              Multi-Source Traceable Evidence
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                              {req.evidence.map((ev, i) => (
+                                <div
+                                  key={i}
+                                  style={{
+                                    padding: 'var(--space-2) var(--space-3)',
+                                    backgroundColor: 'var(--color-bg-card)',
+                                    border: '1px solid var(--color-border-subtle)',
+                                    borderRadius: 'var(--radius-xs)',
+                                    fontSize: 'var(--font-size-xs)',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '4px',
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <span>
+                                      <strong>🏛 Source:</strong> {ev.source} ({ev.identifier || 'Identifier record'})
+                                    </span>
+                                    {ev.verified ? (
+                                      <Badge variant="success">✓ Government Verified</Badge>
+                                    ) : (
+                                      <Badge variant="neutral">Document / AI Only</Badge>
+                                    )}
+                                  </div>
+
+                                  {ev.government_data && Object.keys(ev.government_data).length > 0 && (
+                                    <div style={{ fontFamily: 'var(--font-family-mono)', color: 'var(--color-text-secondary)', fontSize: '11px' }}>
+                                      <strong>Government Registry:</strong> {JSON.stringify(ev.government_data)}
+                                    </div>
+                                  )}
+
+                                  {ev.ai_extracted && Object.keys(ev.ai_extracted).length > 0 && (
+                                    <div style={{ fontFamily: 'var(--font-family-mono)', color: 'var(--color-text-secondary)', fontSize: '11px' }}>
+                                      <strong>Document AI Extracted:</strong> {JSON.stringify(ev.ai_extracted)}
+                                    </div>
+                                  )}
+
+                                  {ev.document_id && (
+                                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                                      Document ID: {ev.document_id}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {req.evaluated_at && (
+                          <div style={{ marginTop: 'var(--space-2)', fontSize: '10px', color: 'var(--color-text-muted)', textAlign: 'right' }}>
+                            Evaluated at: {new Date(req.evaluated_at).toLocaleString()}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            ))}
+                );
+              };
+
+              return (
+                <>
+                  {/* Mandatory Section */}
+                  {mandatoryList.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-text-primary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 'var(--space-2)' }}>
+                        Mandatory Statutory Requirements ({mandatoryList.length})
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                        {mandatoryList.map(renderRequirementCard)}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Optional Section */}
+                  {optionalList.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-text-primary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 'var(--space-2)' }}>
+                        Optional Statutory Requirements ({optionalList.length})
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                        {optionalList.map(renderRequirementCard)}
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
       </div>
+
 
       {/* Documents table */}
       <div

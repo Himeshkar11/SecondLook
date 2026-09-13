@@ -25,9 +25,11 @@ from app.services.government_verification_service import (
     MissingIdentifierError,
     UnsupportedDocumentTypeError,
 )
-from app.services.compliance_service import ComplianceService
+from app.services.compliance_service import ComplianceService, NoApprovedRequirementsError
 from app.schemas.compliance import (
     BidderComplianceResponse,
+    ComplianceEvaluationRead,
+    ComplianceEvaluationSummaryItem,
     TenderExtractionRequest,
     TenderExtractionResponse,
     TenderRequirementCreate,
@@ -101,6 +103,111 @@ def get_tender_bidders(id: str, db: Session = Depends(get_db)):
             detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to load bidders for tender", "details": {}}},
         ) from exc
     return {"items": bidders, "total": len(bidders)}
+
+
+# ============================================================================
+# COMPLIANCE EVALUATION ORCHESTRATION (Task 13)
+# Placed before greedy /tenders/{id:path} to prevent route swallowing
+# ============================================================================
+
+
+@router.post(
+    "/tenders/{tender_id}/bidders/{bidder_id}/compliance/evaluate",
+    response_model=ComplianceEvaluationRead,
+    tags=["Compliance"],
+    summary="Run complete statutory compliance evaluation for a bidder on a tender (Task 13)",
+)
+def run_compliance_evaluation_endpoint(
+    tender_id: str,
+    bidder_id: str,
+    payload: dict = Body(default_factory=dict),
+    db: Session = Depends(get_db),
+):
+    """Execute complete deterministic statutory compliance evaluation for a bidder.
+
+    Strictly evaluates ONLY approved tender requirements against resolved multi-source evidence.
+    Generates a unique evaluation_id and preserves immutable evaluation history.
+    """
+    officer_id = payload.get("officer_id") if isinstance(payload, dict) else None
+    service = ComplianceService(db=db)
+    try:
+        return service.run_compliance_evaluation(
+            tender_id=tender_id, bidder_id=bidder_id, officer_id=officer_id, allow_empty=False
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": str(exc), "details": {}}},
+        ) from exc
+    except NoApprovedRequirementsError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "NO_APPROVED_REQUIREMENTS", "message": str(exc), "details": {}}},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "VALIDATION_ERROR", "message": str(exc), "details": {}}},
+        ) from exc
+    except Exception as exc:
+        logger.error("Failed to run compliance evaluation: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "EVALUATION_ERROR", "message": str(exc), "details": {}}},
+        ) from exc
+
+
+@router.get(
+    "/tenders/{tender_id}/bidders/{bidder_id}/compliance/evaluations",
+    response_model=list[ComplianceEvaluationSummaryItem],
+    tags=["Compliance"],
+    summary="List all historical compliance evaluation runs for a bidder on a tender (Task 13)",
+)
+def list_compliance_evaluations_history_endpoint(
+    tender_id: str,
+    bidder_id: str,
+    db: Session = Depends(get_db),
+):
+    """Fetch immutable audit history of all compliance evaluations executed for this bidder and tender."""
+    service = ComplianceService(db=db)
+    try:
+        return service.get_compliance_evaluations_history(tender_id=tender_id, bidder_id=bidder_id)
+    except Exception as exc:
+        logger.error("Failed to list compliance evaluation history: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "HISTORY_ERROR", "message": str(exc), "details": {}}},
+        ) from exc
+
+
+@router.get(
+    "/compliance/evaluations/{evaluation_id}",
+    response_model=ComplianceEvaluationRead,
+    tags=["Compliance"],
+    summary="Retrieve a compliance evaluation report by evaluation ID (Task 13)",
+)
+def get_compliance_evaluation_endpoint(
+    evaluation_id: str,
+    db: Session = Depends(get_db),
+):
+    """Retrieve full details, summary, and traceable evidence for a specific compliance evaluation run."""
+    service = ComplianceService(db=db)
+    try:
+        eval_read = service.get_compliance_evaluation(evaluation_id=evaluation_id)
+        if not eval_read:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": {"code": "NOT_FOUND", "message": f"Compliance evaluation {evaluation_id} not found", "details": {}}},
+            )
+        return eval_read
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to retrieve compliance evaluation %s: %s", evaluation_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "RETRIEVAL_ERROR", "message": str(exc), "details": {}}},
+        ) from exc
 
 
 @router.get("/tenders/{id:path}", tags=["Tenders"], summary="Get one tender", responses={
@@ -852,4 +959,3 @@ def evaluate_bidder_compliance(
             status_code=500,
             detail={"error": {"code": "EVALUATION_ERROR", "message": str(exc), "details": {}}},
         ) from exc
-

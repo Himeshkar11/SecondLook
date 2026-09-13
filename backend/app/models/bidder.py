@@ -26,4 +26,4 @@ class Bidder(Base):
     verification_jobs: Mapped[list["VerificationJob"]] = relationship("VerificationJob", back_populates="bidder")
     government_verifications: Mapped[list["GovernmentVerification"]] = relationship("GovernmentVerification", back_populates="bidder", cascade="all, delete-orphan")
     evaluations: Mapped[list["RequirementEvaluation"]] = relationship("RequirementEvaluation", back_populates="bidder", cascade="all, delete-orphan")
-
+    compliance_evaluations: Mapped[list["ComplianceEvaluation"]] = relationship("ComplianceEvaluation", back_populates="bidder", cascade="all, delete-orphan")

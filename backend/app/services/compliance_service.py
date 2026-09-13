@@ -21,20 +21,29 @@ from app.models.bidder import Bidder
 from app.models.document import Document
 from app.models.government_verification import GovernmentVerification
 from app.models.tender import Tender
-from app.models.tender_requirement import RequirementEvaluation, TenderRequirement
+from app.models.tender_requirement import ComplianceEvaluation, RequirementEvaluation, TenderRequirement
 from app.schemas.compliance import (
     DEFAULT_COMPLIANCE_DISCLAIMER,
     VALID_REQUIREMENT_STATUSES,
     VALID_REQUIREMENT_TYPES,
     BidderComplianceResponse,
+    ComplianceEvaluationRead,
+    ComplianceEvaluationSummaryItem,
     ComplianceSummary,
     RequirementEvaluationRead,
     TenderRequirementCreate,
     TenderRequirementUpdate,
 )
 from app.verification.compliance_engine import ComplianceEngine, Evidence
+from app.verification.evidence_resolver import EvidenceResolver
 
 logger = logging.getLogger(__name__)
+
+
+class NoApprovedRequirementsError(ValueError):
+    """Raised when an evaluation is attempted with zero approved requirements."""
+    pass
+
 
 # Standard demo statutory requirements per Step 20
 DEFAULT_DEMO_REQUIREMENTS = [
@@ -533,32 +542,72 @@ class ComplianceService:
 
         return evidence_list
 
-    def evaluate_bidder_compliance(
-        self, tender_id: str, bidder_id: str
-    ) -> BidderComplianceResponse:
-        """Run deterministic compliance evaluation for all requirements of a tender."""
+    def run_compliance_evaluation(
+        self,
+        tender_id: str,
+        bidder_id: str,
+        officer_id: Optional[str] = None,
+        allow_empty: bool = False,
+    ) -> ComplianceEvaluationRead:
+        """Run complete deterministic statutory compliance evaluation for a bidder against tender requirements (Task 13).
+
+        Strict Safety & Architecture Rules:
+        1. Validates existence of Tender and Bidder.
+        2. Strict Approval Gate: Evaluates ONLY requirements with status == 'APPROVED'.
+           If zero approved requirements exist and not allow_empty, raises NoApprovedRequirementsError.
+        3. Discovers multi-source evidence using EvidenceResolver (Government > AI > Document).
+        4. Evaluates EVERY approved requirement in deterministic display_order; does NOT abort early on failure.
+        5. Preserves evaluation history: Creates a brand-new ComplianceEvaluation record with unique UUID evaluation_id.
+           NEVER overwrites, mutates, or deletes previous evaluation runs.
+        6. NO automatic bidder approval, rejection, qualification, disqualification, or award scoring.
+        """
         session, should_close = self._get_session()
         try:
-            t_uuid = uuid.UUID(tender_id) if isinstance(tender_id, str) else tender_id
-            b_uuid = uuid.UUID(bidder_id) if isinstance(bidder_id, str) else bidder_id
+            t_uuid = uuid.UUID(str(tender_id))
+            b_uuid = uuid.UUID(str(bidder_id))
 
-            # Verify tender and bidder existence
             tender = session.get(Tender, t_uuid)
+            if not tender:
+                raise KeyError(f"Tender {tender_id} not found")
+
             bidder = session.get(Bidder, b_uuid)
-            bidder_name = bidder.legal_name if bidder else None
+            if not bidder:
+                raise KeyError(f"Bidder {bidder_id} not found")
 
-            # Get requirements
-            requirements = self.get_tender_requirements(str(t_uuid))
-
-            # Collect evidence
-            evidence_list = self.collect_bidder_evidence(str(b_uuid), session)
-
-            # Clear existing evaluations for this tender & bidder
-            del_stmt = delete(RequirementEvaluation).where(
-                RequirementEvaluation.tender_id == t_uuid,
-                RequirementEvaluation.bidder_id == b_uuid,
+            # Check for approved requirements directly from database (do not auto-seed demo rules if empty)
+            req_stmt = (
+                select(TenderRequirement)
+                .where(
+                    TenderRequirement.tender_id == t_uuid,
+                    TenderRequirement.status == "APPROVED",
+                )
+                .order_by(TenderRequirement.display_order.asc(), TenderRequirement.created_at.asc())
             )
-            session.execute(del_stmt)
+            approved_requirements = list(session.execute(req_stmt).scalars().all())
+
+            if not approved_requirements:
+                if allow_empty:
+                    existing_cnt = len(list(session.execute(select(TenderRequirement).where(TenderRequirement.tender_id == t_uuid)).scalars().all()))
+                    if existing_cnt == 0:
+                        approved_requirements = self.ensure_default_demo_requirements(str(t_uuid), session=session)
+                if not approved_requirements and not allow_empty:
+                    raise NoApprovedRequirementsError("No approved tender requirements are available for evaluation.")
+
+            eval_id = uuid.uuid4()
+            now = datetime.now(timezone.utc)
+            eval_record = ComplianceEvaluation(
+                id=eval_id,
+                tender_id=t_uuid,
+                bidder_id=b_uuid,
+                status="PROCESSING",
+                started_at=now,
+            )
+            session.add(eval_record)
+            session.flush()
+
+
+            # Resolve evidence via EvidenceResolver
+            evidence_list, trace_map = EvidenceResolver.resolve_evidence_for_bidder(b_uuid, session)
 
             evaluation_reads: List[RequirementEvaluationRead] = []
             pass_cnt = 0
@@ -568,12 +617,12 @@ class ComplianceService:
             not_applicable_cnt = 0
             mandatory_failed_cnt = 0
             mandatory_not_verified_cnt = 0
-
-            # Strict Task 12 Approval Gate: ComplianceEngine only evaluates APPROVED requirements
-            approved_requirements = [
-                req for req in requirements
-                if getattr(req, "status", "APPROVED") == "APPROVED"
-            ]
+            mandatory_total = 0
+            mandatory_passed = 0
+            optional_total = 0
+            optional_passed = 0
+            optional_failed = 0
+            optional_not_verified = 0
 
             for req in approved_requirements:
                 rule_config = req.rule_config or []
@@ -587,45 +636,90 @@ class ComplianceService:
                     evidence_list=evidence_list,
                 )
 
-                # Persist evaluation record
+                # Format enriched traceable evidence list for this requirement
+                enriched_evidence: List[Dict[str, Any]] = []
+                req_source = (req.type or "").strip().upper()
+
+                # Check if specific rule configs define sources
+                rule_sources = set()
+                for rc in rule_config:
+                    if isinstance(rc, dict) and rc.get("source"):
+                        rule_sources.add(rc["source"].strip().upper())
+                if not rule_sources and req_source:
+                    rule_sources.add(req_source)
+
+                for src in sorted(rule_sources):
+                    if src in trace_map:
+                        enriched_evidence.append(trace_map[src].to_dict())
+
+                if not enriched_evidence:
+                    # Fallback to evidence_used from ComplianceEngine
+                    enriched_evidence = eval_result.evidence_used or []
+
+                # Build explanation including any evidence conflict notes
+                explanation = eval_result.explanation
+                for src in rule_sources:
+                    trace = trace_map.get(src)
+                    if trace and trace.conflict_detected and trace.note:
+                        if trace.note not in explanation:
+                            explanation = f"{explanation}\n  - [AUDIT NOTE] {trace.note}"
+
                 db_eval = RequirementEvaluation(
                     id=uuid.uuid4(),
+                    evaluation_id=eval_id,
                     requirement_id=req.id,
                     bidder_id=b_uuid,
                     tender_id=t_uuid,
                     status=eval_result.status,
                     result={
                         "summary": eval_result.summary,
-                        "explanation": eval_result.explanation,
+                        "explanation": explanation,
                     },
                     rule_results=[r.__dict__ for r in eval_result.rule_results],
-                    evidence=eval_result.evidence_used,
-                    evaluated_at=datetime.now(timezone.utc),
+                    evidence=enriched_evidence,
+                    evaluated_at=now,
                 )
                 session.add(db_eval)
 
                 # Count statistics
                 status = eval_result.status
+                is_mand = bool(req.mandatory)
+                if is_mand:
+                    mandatory_total += 1
+                else:
+                    optional_total += 1
+
                 if status == "PASS":
                     pass_cnt += 1
+                    if is_mand:
+                        mandatory_passed += 1
+                    else:
+                        optional_passed += 1
                 elif status == "FAIL":
                     fail_cnt += 1
-                    if req.mandatory:
+                    if is_mand:
                         mandatory_failed_cnt += 1
+                    else:
+                        optional_failed += 1
                 elif status == "PARTIAL":
                     partial_cnt += 1
-                    if req.mandatory:
+                    if is_mand:
                         mandatory_failed_cnt += 1
+                    else:
+                        optional_failed += 1
                 elif status == "NOT_VERIFIED":
                     not_verified_cnt += 1
-                    if req.mandatory:
+                    if is_mand:
                         mandatory_not_verified_cnt += 1
+                    else:
+                        optional_not_verified += 1
                 elif status == "NOT_APPLICABLE":
                     not_applicable_cnt += 1
 
                 evaluation_reads.append(
                     RequirementEvaluationRead(
                         id=db_eval.id,
+                        evaluation_id=eval_id,
                         requirement_id=req.id,
                         bidder_id=b_uuid,
                         tender_id=t_uuid,
@@ -637,109 +731,100 @@ class ComplianceService:
                         result=db_eval.result,
                         rule_results=db_eval.rule_results,
                         evidence=db_eval.evidence,
-                        evaluated_at=db_eval.evaluated_at.isoformat() if db_eval.evaluated_at else None,
+                        evaluated_at=now.isoformat(),
                     )
                 )
 
+            summary_data = {
+                "total_requirements": len(approved_requirements),
+                "pass_count": pass_cnt,
+                "fail_count": fail_cnt,
+                "partial_count": partial_cnt,
+                "not_verified_count": not_verified_cnt,
+                "not_applicable_count": not_applicable_cnt,
+                "mandatory_failed": mandatory_failed_cnt,
+                "mandatory_not_verified": mandatory_not_verified_cnt,
+                "mandatory_total": mandatory_total,
+                "mandatory_passed": mandatory_passed,
+                "optional_total": optional_total,
+                "optional_passed": optional_passed,
+                "optional_failed": optional_failed,
+                "optional_not_verified": optional_not_verified,
+            }
+
+            eval_record.status = "COMPLETED"
+            eval_record.summary = summary_data
+            eval_record.completed_at = datetime.now(timezone.utc)
             session.commit()
+            session.refresh(eval_record)
 
-            summary = ComplianceSummary(
-                total_requirements=len(approved_requirements),
-                pass_count=pass_cnt,
-                fail_count=fail_cnt,
-                partial_count=partial_cnt,
-                not_verified_count=not_verified_cnt,
-                not_applicable_count=not_applicable_cnt,
-                mandatory_failed=mandatory_failed_cnt,
-                mandatory_not_verified=mandatory_not_verified_cnt,
-            )
+            summary_schema = ComplianceSummary(**summary_data)
 
-            return BidderComplianceResponse(
-                tender_id=str(t_uuid),
-                bidder_id=str(b_uuid),
-                bidder_legal_name=bidder_name,
-                summary=summary,
+            return ComplianceEvaluationRead(
+                evaluation_id=eval_record.id,
+                tender_id=t_uuid,
+                bidder_id=b_uuid,
+                bidder_legal_name=bidder.legal_name,
+                tender_title=tender.title,
+                status=eval_record.status,
+                summary=summary_schema,
                 requirements=evaluation_reads,
+                started_at=eval_record.started_at.isoformat() if eval_record.started_at else None,
+                completed_at=eval_record.completed_at.isoformat() if eval_record.completed_at else None,
+                created_at=eval_record.created_at.isoformat() if eval_record.created_at else None,
                 disclaimer=DEFAULT_COMPLIANCE_DISCLAIMER,
             )
         finally:
             if should_close:
                 session.close()
 
-    def get_bidder_compliance(
-        self, tender_id: str, bidder_id: str
-    ) -> BidderComplianceResponse:
-        """Fetch existing compliance evaluation or run an initial evaluation if none exist."""
+    def get_compliance_evaluation(self, evaluation_id: str) -> Optional[ComplianceEvaluationRead]:
+        """Retrieve a specific compliance evaluation run by its unique UUID."""
         session, should_close = self._get_session()
         try:
-            t_uuid = uuid.UUID(tender_id) if isinstance(tender_id, str) else tender_id
-            b_uuid = uuid.UUID(bidder_id) if isinstance(bidder_id, str) else bidder_id
+            eval_uuid = uuid.UUID(str(evaluation_id))
+            eval_record = session.get(ComplianceEvaluation, eval_uuid)
+            if not eval_record:
+                return None
+
+            tender = session.get(Tender, eval_record.tender_id)
+            bidder = session.get(Bidder, eval_record.bidder_id)
 
             stmt = (
                 select(RequirementEvaluation)
-                .where(
-                    RequirementEvaluation.tender_id == t_uuid,
-                    RequirementEvaluation.bidder_id == b_uuid,
-                )
+                .where(RequirementEvaluation.evaluation_id == eval_uuid)
             )
-            existing_evals = list(session.execute(stmt).scalars().all())
-            if not existing_evals:
-                # Run fresh evaluation
-                return self.evaluate_bidder_compliance(tender_id, bidder_id)
+            req_evals = list(session.execute(stmt).scalars().all())
 
-            # Build response from existing persisted evaluations
-            requirements_map = {
+            req_map = {
                 req.id: req
                 for req in session.execute(
-                    select(TenderRequirement).where(TenderRequirement.tender_id == t_uuid)
+                    select(TenderRequirement).where(TenderRequirement.tender_id == eval_record.tender_id)
                 ).scalars().all()
             }
-            bidder = session.get(Bidder, b_uuid)
 
-            reads: List[RequirementEvaluationRead] = []
-            pass_cnt = 0
-            fail_cnt = 0
-            partial_cnt = 0
-            not_verified_cnt = 0
-            not_applicable_cnt = 0
-            mandatory_failed_cnt = 0
-            mandatory_not_verified_cnt = 0
+            sorted_evals = sorted(
+                req_evals,
+                key=lambda x: (
+                    getattr(req_map.get(x.requirement_id), "display_order", 999),
+                    getattr(x, "evaluated_at", datetime.min),
+                )
+            )
 
-            for ev in existing_evals:
-                req = requirements_map.get(ev.requirement_id)
-                req_code = req.code if req else "UNKNOWN"
-                req_title = req.title if req else "Unknown Requirement"
-                req_type = req.type if req else "GST"
-                is_mandatory = req.mandatory if req else True
-
-                status = ev.status
-                if status == "PASS":
-                    pass_cnt += 1
-                elif status == "FAIL":
-                    fail_cnt += 1
-                    if is_mandatory:
-                        mandatory_failed_cnt += 1
-                elif status == "PARTIAL":
-                    partial_cnt += 1
-                    if is_mandatory:
-                        mandatory_failed_cnt += 1
-                elif status == "NOT_VERIFIED":
-                    not_verified_cnt += 1
-                    if is_mandatory:
-                        mandatory_not_verified_cnt += 1
-                elif status == "NOT_APPLICABLE":
-                    not_applicable_cnt += 1
-
-                reads.append(
+            evaluation_reads: List[RequirementEvaluationRead] = []
+            for ev in sorted_evals:
+                req = req_map.get(ev.requirement_id)
+                evaluation_reads.append(
                     RequirementEvaluationRead(
                         id=ev.id,
+                        evaluation_id=eval_record.id,
                         requirement_id=ev.requirement_id,
                         bidder_id=ev.bidder_id,
                         tender_id=ev.tender_id,
-                        requirement_code=req_code,
-                        requirement_title=req_title,
-                        requirement_type=req_type,
-                        mandatory=is_mandatory,
+                        requirement_code=req.code if req else "REQ",
+                        requirement_title=req.title if req else "Requirement",
+                        requirement_type=req.type if req else "GST",
+                        mandatory=req.mandatory if req else True,
                         status=ev.status,
                         result=ev.result,
                         rule_results=ev.rule_results,
@@ -748,24 +833,109 @@ class ComplianceService:
                     )
                 )
 
-            summary = ComplianceSummary(
-                total_requirements=len(existing_evals),
-                pass_count=pass_cnt,
-                fail_count=fail_cnt,
-                partial_count=partial_cnt,
-                not_verified_count=not_verified_cnt,
-                not_applicable_count=not_applicable_cnt,
-                mandatory_failed=mandatory_failed_cnt,
-                mandatory_not_verified=mandatory_not_verified_cnt,
+            summary_dict = eval_record.summary or {}
+            summary_schema = ComplianceSummary(**summary_dict)
+
+            return ComplianceEvaluationRead(
+                evaluation_id=eval_record.id,
+                tender_id=eval_record.tender_id,
+                bidder_id=eval_record.bidder_id,
+                bidder_legal_name=bidder.legal_name if bidder else None,
+                tender_title=tender.title if tender else None,
+                status=eval_record.status,
+                summary=summary_schema,
+                requirements=evaluation_reads,
+                started_at=eval_record.started_at.isoformat() if eval_record.started_at else None,
+                completed_at=eval_record.completed_at.isoformat() if eval_record.completed_at else None,
+                created_at=eval_record.created_at.isoformat() if eval_record.created_at else None,
+                disclaimer=DEFAULT_COMPLIANCE_DISCLAIMER,
             )
+        finally:
+            if should_close:
+                session.close()
+
+    def get_compliance_evaluations_history(
+        self, tender_id: str, bidder_id: str
+    ) -> List[ComplianceEvaluationSummaryItem]:
+        """Fetch audit history of all compliance evaluation runs for a bidder on a tender."""
+        session, should_close = self._get_session()
+        try:
+            t_uuid = uuid.UUID(str(tender_id))
+            b_uuid = uuid.UUID(str(bidder_id))
+
+            stmt = (
+                select(ComplianceEvaluation)
+                .where(
+                    ComplianceEvaluation.tender_id == t_uuid,
+                    ComplianceEvaluation.bidder_id == b_uuid,
+                )
+                .order_by(ComplianceEvaluation.started_at.desc(), ComplianceEvaluation.created_at.desc())
+            )
+            records = list(session.execute(stmt).scalars().all())
+            return [
+                ComplianceEvaluationSummaryItem(
+                    evaluation_id=r.id,
+                    tender_id=r.tender_id,
+                    bidder_id=r.bidder_id,
+                    status=r.status,
+                    summary=r.summary,
+                    created_at=r.created_at.isoformat() if r.created_at else "",
+                    completed_at=r.completed_at.isoformat() if r.completed_at else None,
+                )
+                for r in records
+            ]
+        finally:
+            if should_close:
+                session.close()
+
+    def evaluate_bidder_compliance(
+        self, tender_id: str, bidder_id: str
+    ) -> BidderComplianceResponse:
+        """Run deterministic compliance evaluation for all approved requirements of a tender (Task 11 / Task 13)."""
+        eval_read = self.run_compliance_evaluation(tender_id=tender_id, bidder_id=bidder_id, allow_empty=True)
+        return BidderComplianceResponse(
+            evaluation_id=str(eval_read.evaluation_id),
+            tender_id=str(eval_read.tender_id),
+            bidder_id=str(eval_read.bidder_id),
+            bidder_legal_name=eval_read.bidder_legal_name,
+            summary=eval_read.summary,
+            requirements=eval_read.requirements,
+            disclaimer=eval_read.disclaimer,
+        )
+
+    def get_bidder_compliance(
+        self, tender_id: str, bidder_id: str
+    ) -> BidderComplianceResponse:
+        """Fetch latest compliance evaluation or run an initial evaluation if none exist."""
+        session, should_close = self._get_session()
+        try:
+            t_uuid = uuid.UUID(tender_id) if isinstance(tender_id, str) else tender_id
+            b_uuid = uuid.UUID(bidder_id) if isinstance(bidder_id, str) else bidder_id
+
+            stmt = (
+                select(ComplianceEvaluation)
+                .where(
+                    ComplianceEvaluation.tender_id == t_uuid,
+                    ComplianceEvaluation.bidder_id == b_uuid,
+                )
+                .order_by(ComplianceEvaluation.created_at.desc())
+            )
+            latest_eval = session.execute(stmt).scalars().first()
+            if not latest_eval:
+                return self.evaluate_bidder_compliance(tender_id, bidder_id)
+
+            eval_read = self.get_compliance_evaluation(str(latest_eval.id))
+            if not eval_read:
+                return self.evaluate_bidder_compliance(tender_id, bidder_id)
 
             return BidderComplianceResponse(
-                tender_id=str(t_uuid),
-                bidder_id=str(b_uuid),
-                bidder_legal_name=bidder.legal_name if bidder else None,
-                summary=summary,
-                requirements=reads,
-                disclaimer=DEFAULT_COMPLIANCE_DISCLAIMER,
+                evaluation_id=str(eval_read.evaluation_id),
+                tender_id=str(eval_read.tender_id),
+                bidder_id=str(eval_read.bidder_id),
+                bidder_legal_name=eval_read.bidder_legal_name,
+                summary=eval_read.summary,
+                requirements=eval_read.requirements,
+                disclaimer=eval_read.disclaimer,
             )
         finally:
             if should_close:

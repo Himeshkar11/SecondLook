@@ -8,6 +8,8 @@ from .audit_log import AuditLogRead
 from .government_verification import DocumentVerificationResponse, GovernmentVerificationRead
 from .compliance import (
     BidderComplianceResponse,
+    ComplianceEvaluationRead,
+    ComplianceEvaluationSummaryItem,
     ComplianceSummary,
     EvidenceRead,
     RequirementEvaluationRead,
@@ -46,5 +48,7 @@ __all__ = [
     "RequirementEvaluationRead",
     "ComplianceSummary",
     "BidderComplianceResponse",
+    "ComplianceEvaluationRead",
+    "ComplianceEvaluationSummaryItem",
 ]
 

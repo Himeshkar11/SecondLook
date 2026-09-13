@@ -45,17 +45,43 @@ class TenderRequirement(Base):
     evaluations: Mapped[list["RequirementEvaluation"]] = relationship("RequirementEvaluation", back_populates="requirement", cascade="all, delete-orphan")
 
 
+class ComplianceEvaluation(Base):
+    """Container representing a single complete compliance evaluation run (Task 13).
+
+    Preserves full evaluation history with a unique UUID evaluation_id.
+    Each run evaluates all approved tender requirements against resolved bidder evidence.
+    """
+
+    __tablename__ = "compliance_evaluations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tender_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenders.id", ondelete="CASCADE"), nullable=False)
+    bidder_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("bidders.id", ondelete="CASCADE"), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="PENDING")  # PENDING, PROCESSING, COMPLETED, FAILED
+    summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    tender: Mapped["Tender"] = relationship("Tender", back_populates="compliance_evaluations")
+    bidder: Mapped["Bidder"] = relationship("Bidder", back_populates="compliance_evaluations")
+    requirement_evaluations: Mapped[list["RequirementEvaluation"]] = relationship(
+        "RequirementEvaluation", back_populates="evaluation", cascade="all, delete-orphan"
+    )
+
 
 class RequirementEvaluation(Base):
-    """Individual tender requirement evaluation outcome for a bidder (Task 11).
+    """Individual tender requirement evaluation outcome for a bidder (Task 11 & Task 13).
 
     Stores factual compliance status (PASS/FAIL/PARTIAL/NOT_VERIFIED/NOT_APPLICABLE),
-    rule breakdowns, and traceable evidence links.
+    rule breakdowns, and traceable evidence links. References evaluation_id for audit history.
     """
 
     __tablename__ = "requirement_evaluations"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    evaluation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("compliance_evaluations.id", ondelete="CASCADE"), nullable=True)
     requirement_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tender_requirements.id", ondelete="CASCADE"), nullable=False)
     bidder_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("bidders.id", ondelete="CASCADE"), nullable=False)
     tender_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenders.id", ondelete="CASCADE"), nullable=False)
@@ -68,3 +94,4 @@ class RequirementEvaluation(Base):
     requirement: Mapped["TenderRequirement"] = relationship("TenderRequirement", back_populates="evaluations")
     bidder: Mapped["Bidder"] = relationship("Bidder", back_populates="evaluations")
     tender: Mapped["Tender"] = relationship("Tender")
+    evaluation: Mapped["ComplianceEvaluation | None"] = relationship("ComplianceEvaluation", back_populates="requirement_evaluations")

@@ -79,3 +79,27 @@ export async function evaluateBidderCompliance(bidderId, tenderId) {
     body: JSON.stringify({ tender_id: tenderId }),
   });
 }
+
+/**
+ * Task 13 Multi-Source Compliance Pipeline & Orchestration APIs
+ */
+
+export async function runComplianceEvaluation(tenderId, bidderId) {
+  return apiClient(
+    `/api/v1/tenders/${encodeURIComponent(tenderId)}/bidders/${encodeURIComponent(bidderId)}/compliance/evaluate`,
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }
+  );
+}
+
+export async function getComplianceEvaluation(evaluationId) {
+  return apiClient(`/api/v1/compliance/evaluations/${encodeURIComponent(evaluationId)}`);
+}
+
+export async function getComplianceEvaluationsHistory(tenderId, bidderId) {
+  return apiClient(
+    `/api/v1/tenders/${encodeURIComponent(tenderId)}/bidders/${encodeURIComponent(bidderId)}/compliance/evaluations`
+  );
+}
