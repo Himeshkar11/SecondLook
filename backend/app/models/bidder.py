@@ -25,4 +25,5 @@ class Bidder(Base):
     documents: Mapped[list["Document"]] = relationship("Document", back_populates="bidder")
     verification_jobs: Mapped[list["VerificationJob"]] = relationship("VerificationJob", back_populates="bidder")
     government_verifications: Mapped[list["GovernmentVerification"]] = relationship("GovernmentVerification", back_populates="bidder", cascade="all, delete-orphan")
+    evaluations: Mapped[list["RequirementEvaluation"]] = relationship("RequirementEvaluation", back_populates="bidder", cascade="all, delete-orphan")
 

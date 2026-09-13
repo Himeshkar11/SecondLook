@@ -6,6 +6,16 @@ from .verification_job import VerificationJobCreate, VerificationJobRead
 from .verification_result import VerificationResultRead
 from .audit_log import AuditLogRead
 from .government_verification import DocumentVerificationResponse, GovernmentVerificationRead
+from .compliance import (
+    BidderComplianceResponse,
+    ComplianceSummary,
+    EvidenceRead,
+    RequirementEvaluationRead,
+    RuleConfigSchema,
+    RuleResultSchema,
+    TenderRequirementCreate,
+    TenderRequirementRead,
+)
 
 __all__ = [
     "UserCreate",
@@ -22,5 +32,13 @@ __all__ = [
     "AuditLogRead",
     "GovernmentVerificationRead",
     "DocumentVerificationResponse",
+    "RuleConfigSchema",
+    "TenderRequirementCreate",
+    "TenderRequirementRead",
+    "RuleResultSchema",
+    "EvidenceRead",
+    "RequirementEvaluationRead",
+    "ComplianceSummary",
+    "BidderComplianceResponse",
 ]
 

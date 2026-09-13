@@ -7,6 +7,7 @@ from .verification_job import VerificationJob
 from .verification_result import VerificationResult
 from .audit_log import AuditLog
 from .government_verification import GovernmentVerification
+from .tender_requirement import RequirementEvaluation, TenderRequirement
 
 __all__ = [
     "Base",
@@ -18,5 +19,7 @@ __all__ = [
     "VerificationResult",
     "AuditLog",
     "GovernmentVerification",
+    "TenderRequirement",
+    "RequirementEvaluation",
 ]
 

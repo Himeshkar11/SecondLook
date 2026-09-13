@@ -6,6 +6,7 @@ import Button from '../components/common/Button.jsx';
 import Loading from '../components/common/Loading.jsx';
 import EmptyState from '../components/common/EmptyState.jsx';
 import { getTenderById, getTenderBidders } from '../services/tenderService.js';
+import { getTenderRequirements } from '../services/complianceService.js';
 
 /**
  * TenderDetailPage — Dynamic Supabase-backed tender detail view.
@@ -19,10 +20,12 @@ export default function TenderDetailPage() {
 
   const [tender, setTender] = useState(null);
   const [bidders, setBidders] = useState([]);
+  const [requirements, setRequirements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [notFound, setNotFound] = useState(false);
   const [biddersLoading, setBiddersLoading] = useState(false);
+  const [requirementsLoading, setRequirementsLoading] = useState(false);
 
   const fetchTenderDetails = useCallback(async () => {
     setLoading(true);
@@ -30,10 +33,22 @@ export default function TenderDetailPage() {
     setNotFound(false);
     setTender(null);
     setBidders([]);
+    setRequirements([]);
 
     try {
       const data = await getTenderById(tenderId);
       setTender(data);
+
+      // Fetch statutory requirements
+      setRequirementsLoading(true);
+      try {
+        const reqData = await getTenderRequirements(tenderId);
+        setRequirements(Array.isArray(reqData) ? reqData : []);
+      } catch {
+        setRequirements([]);
+      } finally {
+        setRequirementsLoading(false);
+      }
 
       // Now fetch associated bidders
       setBiddersLoading(true);
@@ -219,6 +234,113 @@ export default function TenderDetailPage() {
             {tender.description || 'No description available.'}
           </p>
         </div>
+      </div>
+
+      {/* Statutory Tender Requirements (Task 11) */}
+      <div
+        style={{
+          backgroundColor: 'var(--color-bg-card)',
+          borderRadius: 'var(--radius-md)',
+          border: '1px solid var(--color-border)',
+          boxShadow: 'var(--shadow-xs)',
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            padding: 'var(--space-4) var(--space-5)',
+            borderBottom: '1px solid var(--color-border)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div>
+            <h3 style={{ fontSize: 'var(--font-size-base)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-primary)' }}>
+              Statutory Tender Requirements
+            </h3>
+            <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+              Deterministic eligibility criteria evaluated against verified evidence
+            </p>
+          </div>
+          <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+            {requirementsLoading ? '…' : `${requirements.length} statutory requirements`}
+          </span>
+        </div>
+
+        {requirementsLoading ? (
+          <div style={{ padding: 'var(--space-6)' }}>
+            <Loading message="Loading tender requirements..." size="sm" />
+          </div>
+        ) : requirements.length === 0 ? (
+          <div style={{ padding: 'var(--space-6)', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
+            No statutory requirements configured for this tender.
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 'var(--font-size-sm)' }}>
+              <thead>
+                <tr
+                  style={{
+                    backgroundColor: 'var(--color-bg-subtle)',
+                    borderBottom: '1px solid var(--color-border)',
+                    fontSize: 'var(--font-size-xs)',
+                    color: 'var(--color-text-muted)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  }}
+                >
+                  <th style={{ padding: 'var(--space-3) var(--space-5)' }}>Code</th>
+                  <th style={{ padding: 'var(--space-3) var(--space-4)' }}>Title & Description</th>
+                  <th style={{ padding: 'var(--space-3) var(--space-4)' }}>Category</th>
+                  <th style={{ padding: 'var(--space-3) var(--space-4)' }}>Mandatory</th>
+                  <th style={{ padding: 'var(--space-3) var(--space-5)' }}>Rules</th>
+                </tr>
+              </thead>
+              <tbody>
+                {requirements.map((req, index) => (
+                  <tr
+                    key={req.id || req.code}
+                    style={{
+                      borderBottom: index === requirements.length - 1 ? 'none' : '1px solid var(--color-border-subtle)',
+                    }}
+                  >
+                    <td style={{ padding: 'var(--space-3) var(--space-5)', fontFamily: 'var(--font-family-mono)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-primary)' }}>
+                      {req.code}
+                    </td>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                      <div style={{ fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)' }}>
+                        {req.title}
+                      </div>
+                      {req.description && (
+                        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                          {req.description}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                      <Badge variant="neutral">{req.type}</Badge>
+                    </td>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                      {req.mandatory ? (
+                        <Badge variant="warning">Mandatory</Badge>
+                      ) : (
+                        <Badge variant="neutral">Optional</Badge>
+                      )}
+                    </td>
+                    <td style={{ padding: 'var(--space-3) var(--space-5)', fontSize: 'var(--font-size-xs)', fontFamily: 'var(--font-family-mono)', color: 'var(--color-text-secondary)' }}>
+                      {(req.rule_config || []).map((rc, i) => (
+                        <div key={i}>
+                          {rc.source}.{rc.field} {rc.operator} {rc.expected_value ? `"${rc.expected_value}"` : ''}
+                        </div>
+                      ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Bidders table */}

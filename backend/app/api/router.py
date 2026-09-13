@@ -24,6 +24,12 @@ from app.services.government_verification_service import (
     MissingIdentifierError,
     UnsupportedDocumentTypeError,
 )
+from app.services.compliance_service import ComplianceService
+from app.schemas.compliance import (
+    BidderComplianceResponse,
+    TenderRequirementCreate,
+    TenderRequirementRead,
+)
 from app.services.tender_service import TenderService
 from app.services.verification_service import VerificationService
 from app.workers.jobs import DocumentOCRStatus
@@ -473,3 +479,131 @@ def get_audit(id: UUID):
         "details": {},
         "created_at": "2026-09-11T00:00:00Z",
     }
+
+
+# ============================================================================
+# COMPLIANCE ENGINE & TENDER REQUIREMENTS (Task 11)
+# Layer 3: Factual statutory requirement evaluation. No procurement decisions.
+# ============================================================================
+
+
+@router.get(
+    "/tenders/{tender_id}/requirements",
+    response_model=list[TenderRequirementRead],
+    tags=["Compliance"],
+    summary="Get statutory requirements for a tender",
+)
+def get_tender_requirements(tender_id: str, db: Session = Depends(get_db)):
+    """Fetch statutory requirements defined for a tender."""
+    service = ComplianceService(db=db)
+    try:
+        reqs = service.get_tender_requirements(tender_id)
+        return [
+            TenderRequirementRead(
+                id=r.id,
+                tender_id=r.tender_id,
+                code=r.code,
+                title=r.title,
+                description=r.description,
+                type=r.type,
+                mandatory=r.mandatory,
+                display_order=r.display_order,
+                rule_config=r.rule_config if isinstance(r.rule_config, list) else [r.rule_config],
+                created_at=r.created_at.isoformat() if r.created_at else None,
+            )
+            for r in reqs
+        ]
+    except Exception as exc:
+        logger.error("Failed to load tender requirements: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "DATABASE_ERROR", "message": str(exc), "details": {}}},
+        ) from exc
+
+
+@router.post(
+    "/tenders/{tender_id}/requirements",
+    response_model=TenderRequirementRead,
+    tags=["Compliance"],
+    summary="Create a statutory requirement for a tender",
+)
+def create_tender_requirement(
+    tender_id: str,
+    payload: TenderRequirementCreate,
+    db: Session = Depends(get_db),
+):
+    """Add a new statutory requirement to a tender."""
+    service = ComplianceService(db=db)
+    try:
+        r = service.create_tender_requirement(tender_id, payload)
+        return TenderRequirementRead(
+            id=r.id,
+            tender_id=r.tender_id,
+            code=r.code,
+            title=r.title,
+            description=r.description,
+            type=r.type,
+            mandatory=r.mandatory,
+            display_order=r.display_order,
+            rule_config=r.rule_config if isinstance(r.rule_config, list) else [r.rule_config],
+            created_at=r.created_at.isoformat() if r.created_at else None,
+        )
+    except Exception as exc:
+        logger.error("Failed to create tender requirement: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "CREATION_FAILED", "message": str(exc), "details": {}}},
+        ) from exc
+
+
+@router.get(
+    "/bidders/{bidder_id}/compliance",
+    response_model=BidderComplianceResponse,
+    tags=["Compliance"],
+    summary="Get bidder statutory compliance evaluation for a tender",
+)
+def get_bidder_compliance(
+    bidder_id: str,
+    tender_id: str,
+    db: Session = Depends(get_db),
+):
+    """Retrieve or run factual compliance evaluations of tender requirements against verified evidence."""
+    service = ComplianceService(db=db)
+    try:
+        return service.get_bidder_compliance(tender_id=tender_id, bidder_id=bidder_id)
+    except Exception as exc:
+        logger.error("Failed to get bidder compliance: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "EVALUATION_ERROR", "message": str(exc), "details": {}}},
+        ) from exc
+
+
+@router.post(
+    "/bidders/{bidder_id}/compliance/evaluate",
+    response_model=BidderComplianceResponse,
+    tags=["Compliance"],
+    summary="Trigger compliance evaluation for a bidder against tender requirements",
+)
+def evaluate_bidder_compliance(
+    bidder_id: str,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    """Execute fresh deterministic compliance evaluation against verified evidence."""
+    tender_id = payload.get("tender_id")
+    if not tender_id:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"code": "VALIDATION_ERROR", "message": "tender_id is required in body", "details": {}}},
+        )
+    service = ComplianceService(db=db)
+    try:
+        return service.evaluate_bidder_compliance(tender_id=tender_id, bidder_id=bidder_id)
+    except Exception as exc:
+        logger.error("Failed to evaluate bidder compliance: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "EVALUATION_ERROR", "message": str(exc), "details": {}}},
+        ) from exc
+

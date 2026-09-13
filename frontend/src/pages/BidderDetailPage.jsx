@@ -6,6 +6,7 @@ import Button from '../components/common/Button.jsx';
 import Loading from '../components/common/Loading.jsx';
 import EmptyState from '../components/common/EmptyState.jsx';
 import { getBidderById } from '../services/bidderService.js';
+import { getBidderCompliance, evaluateBidderCompliance } from '../services/complianceService.js';
 
 /**
  * BidderDetailPage — Dynamic Supabase-backed bidder profile.
@@ -20,6 +21,9 @@ export default function BidderDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [notFound, setNotFound] = useState(false);
+  const [compliance, setCompliance] = useState(null);
+  const [complianceLoading, setComplianceLoading] = useState(false);
+  const [evaluating, setEvaluating] = useState(false);
 
   const fetchBidderDetails = useCallback(async () => {
     if (!bidderId) {
@@ -32,10 +36,25 @@ export default function BidderDetailPage() {
     setError(null);
     setNotFound(false);
     setBidder(null);
+    setCompliance(null);
 
     try {
       const data = await getBidderById(bidderId);
       setBidder(data);
+
+      const tid = data?.tender_id || (data?.tenders && data.tenders[0]?.id) || data?.tenderId;
+      if (tid) {
+        setComplianceLoading(true);
+        try {
+          const compData = await getBidderCompliance(bidderId, tid);
+          setCompliance(compData);
+        } catch (cErr) {
+          console.error('Failed to load compliance data:', cErr);
+          setCompliance(null);
+        } finally {
+          setComplianceLoading(false);
+        }
+      }
     } catch (err) {
       if (err?.status === 404 || err?.message?.includes('404')) {
         setNotFound(true);
@@ -46,6 +65,20 @@ export default function BidderDetailPage() {
       setLoading(false);
     }
   }, [bidderId]);
+
+  const handleRunEvaluation = async () => {
+    const tid = bidder?.tender_id || (bidder?.tenders && bidder.tenders[0]?.id) || bidder?.tenderId;
+    if (!tid) return;
+    setEvaluating(true);
+    try {
+      const compData = await evaluateBidderCompliance(bidderId, tid);
+      setCompliance(compData);
+    } catch (err) {
+      console.error('Compliance evaluation error:', err);
+    } finally {
+      setEvaluating(false);
+    }
+  };
 
   useEffect(() => {
     fetchBidderDetails();
@@ -93,6 +126,17 @@ export default function BidderDetailPage() {
       case 'UPLOADED': return <Badge variant="info">Uploaded</Badge>;
       case 'PENDING': return <Badge variant="warning">Pending</Badge>;
       case 'REJECTED': return <Badge variant="danger">Rejected</Badge>;
+      default: return <Badge variant="neutral">{status}</Badge>;
+    }
+  };
+
+  const getComplianceStatusBadge = (status) => {
+    switch ((status || '').toUpperCase()) {
+      case 'PASS': return <Badge variant="success">PASS</Badge>;
+      case 'FAIL': return <Badge variant="danger">FAIL</Badge>;
+      case 'PARTIAL': return <Badge variant="warning">PARTIAL</Badge>;
+      case 'NOT_VERIFIED': return <Badge variant="neutral">NOT VERIFIED</Badge>;
+      case 'NOT_APPLICABLE': return <Badge variant="info">NOT APPLICABLE</Badge>;
       default: return <Badge variant="neutral">{status}</Badge>;
     }
   };
@@ -278,6 +322,254 @@ export default function BidderDetailPage() {
             <span style={valueStyle}>{bidder.phone || '+91-11-23456789'}</span>
           </div>
         </div>
+      </div>
+
+      {/* Statutory Compliance Verification (Task 11) */}
+      <div
+        style={{
+          backgroundColor: 'var(--color-bg-card)',
+          borderRadius: 'var(--radius-md)',
+          border: '1px solid var(--color-border)',
+          boxShadow: 'var(--shadow-xs)',
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            padding: 'var(--space-4) var(--space-5)',
+            borderBottom: '1px solid var(--color-border)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 'var(--space-3)',
+          }}
+        >
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              <h3 style={{ fontSize: 'var(--font-size-base)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-primary)', margin: 0 }}>
+                Statutory Compliance Verification
+              </h3>
+              <Badge variant="neutral">Layer 3: Rules Engine</Badge>
+            </div>
+            <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: '2px', marginBottom: 0 }}>
+              Deterministic requirement evaluation against government-verified evidence
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleRunEvaluation}
+              disabled={evaluating || complianceLoading}
+            >
+              {evaluating ? 'Evaluating…' : '↻ Re-evaluate Compliance'}
+            </Button>
+          </div>
+        </div>
+
+        {/* Disclaimer banner */}
+        <div
+          style={{
+            backgroundColor: 'var(--color-bg-subtle)',
+            padding: 'var(--space-3) var(--space-5)',
+            borderBottom: '1px solid var(--color-border-subtle)',
+            fontSize: 'var(--font-size-xs)',
+            color: 'var(--color-text-secondary)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-2)',
+          }}
+        >
+          <span>⚖️</span>
+          <span>
+            <strong>Statutory Notice:</strong> Automated factual verification of individual statutory requirements based on verified evidence. Final procurement determinations are made solely by the procurement officer.
+          </span>
+        </div>
+
+        {/* Compliance metrics overview */}
+        {compliance && compliance.summary && (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+              gap: 'var(--space-3)',
+              padding: 'var(--space-4) var(--space-5)',
+              borderBottom: '1px solid var(--color-border-subtle)',
+              backgroundColor: 'var(--color-bg-card)',
+            }}
+          >
+            <div style={{ textAlign: 'center', padding: 'var(--space-2)', backgroundColor: 'var(--color-bg-subtle)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Requirements</div>
+              <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-text-primary)' }}>
+                {compliance.summary.total_requirements}
+              </div>
+            </div>
+            <div style={{ textAlign: 'center', padding: 'var(--space-2)', backgroundColor: 'var(--color-bg-subtle)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-success)', textTransform: 'uppercase' }}>Pass</div>
+              <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-success)' }}>
+                {compliance.summary.pass_count}
+              </div>
+            </div>
+            <div style={{ textAlign: 'center', padding: 'var(--space-2)', backgroundColor: 'var(--color-bg-subtle)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-danger)', textTransform: 'uppercase' }}>Fail</div>
+              <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-danger)' }}>
+                {compliance.summary.fail_count}
+              </div>
+            </div>
+            <div style={{ textAlign: 'center', padding: 'var(--space-2)', backgroundColor: 'var(--color-bg-subtle)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-warning)', textTransform: 'uppercase' }}>Partial</div>
+              <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-warning)' }}>
+                {compliance.summary.partial_count}
+              </div>
+            </div>
+            <div style={{ textAlign: 'center', padding: 'var(--space-2)', backgroundColor: 'var(--color-bg-subtle)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Not Verified</div>
+              <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-text-secondary)' }}>
+                {compliance.summary.not_verified_count}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Requirements list */}
+        {complianceLoading ? (
+          <div style={{ padding: 'var(--space-6)' }}>
+            <Loading message="Evaluating statutory compliance..." size="sm" />
+          </div>
+        ) : !compliance || !compliance.requirements || compliance.requirements.length === 0 ? (
+          <div style={{ padding: 'var(--space-6)', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)' }}>
+            No compliance evaluation recorded yet.{' '}
+            <button
+              type="button"
+              onClick={handleRunEvaluation}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--color-primary)',
+                cursor: 'pointer',
+                textDecoration: 'underline',
+                padding: 0,
+              }}
+            >
+              Run evaluation now
+            </button>
+          </div>
+        ) : (
+          <div style={{ padding: 'var(--space-4) var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            {compliance.requirements.map((req) => (
+              <div
+                key={req.requirement_id || req.requirement_code}
+                style={{
+                  border: '1px solid var(--color-border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: 'var(--space-4)',
+                  backgroundColor: 'var(--color-bg-subtle)',
+                }}
+              >
+                {/* Requirement header */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                    <span style={{ fontFamily: 'var(--font-family-mono)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-primary)', fontSize: 'var(--font-size-sm)' }}>
+                      {req.requirement_code}
+                    </span>
+                    <span style={{ fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-sm)' }}>
+                      {req.requirement_title}
+                    </span>
+                    {req.mandatory && <Badge variant="warning">Mandatory</Badge>}
+                  </div>
+                  <div>
+                    {getComplianceStatusBadge(req.status)}
+                  </div>
+                </div>
+
+                {/* Explanation */}
+                {req.result?.summary && (
+                  <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-3)' }}>
+                    {req.result.summary}
+                  </p>
+                )}
+
+                {/* Rule-level breakdown */}
+                {req.rule_results && req.rule_results.length > 0 && (
+                  <div style={{ marginTop: 'var(--space-2)', borderTop: '1px solid var(--color-border-subtle)', paddingTop: 'var(--space-2)' }}>
+                    <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: 'var(--space-1)' }}>
+                      Rule Criteria Breakdown
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+                      {req.rule_results.map((rr, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            fontSize: 'var(--font-size-xs)',
+                            padding: 'var(--space-1) var(--space-2)',
+                            backgroundColor: 'var(--color-bg-card)',
+                            borderRadius: 'var(--radius-xs)',
+                          }}
+                        >
+                          <span style={{ fontFamily: 'var(--font-family-mono)', color: 'var(--color-text-primary)' }}>
+                            {rr.field} ({rr.operator}): {rr.expected != null ? `expected "${rr.expected}", ` : ''}actual "{rr.actual ?? 'NONE'}"
+                          </span>
+                          <span>
+                            {rr.status === 'PASS' ? (
+                              <span style={{ color: 'var(--color-success)', fontWeight: 'var(--font-weight-bold)' }}>✓ PASS</span>
+                            ) : rr.status === 'FAIL' ? (
+                              <span style={{ color: 'var(--color-danger)', fontWeight: 'var(--font-weight-bold)' }}>✗ FAIL</span>
+                            ) : (
+                              <span style={{ color: 'var(--color-text-muted)' }}>— NOT VERIFIED</span>
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Traceable Evidence links */}
+                {req.evidence && req.evidence.length > 0 && (
+                  <div style={{ marginTop: 'var(--space-2)', borderTop: '1px solid var(--color-border-subtle)', paddingTop: 'var(--space-2)' }}>
+                    <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: 'var(--space-1)' }}>
+                      Traceable Evidence
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+                      {req.evidence.map((ev, i) => (
+                        <span
+                          key={i}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 'var(--space-1)',
+                            fontSize: 'var(--font-size-xs)',
+                            fontFamily: 'var(--font-family-mono)',
+                            padding: '2px 6px',
+                            backgroundColor: 'var(--color-bg-card)',
+                            border: '1px solid var(--color-border-subtle)',
+                            borderRadius: 'var(--radius-xs)',
+                          }}
+                        >
+                          <span>🏛 {ev.source}:</span>
+                          <strong>{ev.identifier || 'Record'}</strong>
+                          {ev.verified ? (
+                            <span style={{ color: 'var(--color-success)' }}>✓ Verified</span>
+                          ) : (
+                            <span style={{ color: 'var(--color-warning)' }}>⚠️ Unverified</span>
+                          )}
+                          {ev.document_id && (
+                            <span style={{ color: 'var(--color-text-muted)' }}>(Doc: {ev.document_id.slice(0, 8)}…)</span>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Documents table */}

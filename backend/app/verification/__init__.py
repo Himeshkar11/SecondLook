@@ -28,6 +28,12 @@ from app.verification.pipeline import (
     VerificationPipeline,
     VerificationPipelineResult,
 )
+from app.verification.compliance_engine import (
+    ComplianceEngine,
+    Evidence,
+    RequirementResult,
+    RuleResult,
+)
 
 __all__ = [
     "Rule",
@@ -46,4 +52,8 @@ __all__ = [
     "PipelineStage",
     "VerificationPipeline",
     "VerificationPipelineResult",
+    "ComplianceEngine",
+    "Evidence",
+    "RuleResult",
+    "RequirementResult",
 ]

@@ -29,3 +29,5 @@ class Tender(Base):
 
     creator: Mapped["User"] = relationship("User", back_populates="tenders")
     bidders: Mapped[list["Bidder"]] = relationship("Bidder", secondary="tender_bidders", back_populates="tenders")
+    requirements: Mapped[list["TenderRequirement"]] = relationship("TenderRequirement", back_populates="tender", cascade="all, delete-orphan")
+
