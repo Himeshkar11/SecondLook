@@ -136,7 +136,12 @@ Milestone 02 adds the following database foundation without implementing authent
 - `bidders.user_id` is unique, preserving existing bidder IDs and preventing a second bidder profile for one user.
 - `officer_profiles` is a minimal one-to-one table with a cascading foreign key to `users`.
 - The migration aborts if duplicate bidder profiles are found rather than deleting or merging records.
-- A read-only live preflight found one legacy `admin` user and one duplicate bidder-user group with three bidder rows. The migration has not been applied because the duplicate group requires manual ownership/data resolution.
+- The confirmed demo organizations were kept as three separate records: ABC `...021`, XYZ `...022`, and DEF `...023`.
+- Deterministic demo application users `...031`, `...032`, and `...033` were created with canonical role `BIDDER`; no passwords or Supabase Auth identities were created.
+- The legacy `admin@gem.gov.in` user `...001` remains unchanged and owns no bidder profile.
+- The M2 migration was applied transactionally after reconciliation. Live verification confirms the unique bidder index, officer profile table and uniqueness, role check, zero duplicate ownership groups, and preserved history.
+
+The local uncommitted rollback snapshot is `m2_reconciliation_snapshot.json`. The reconciliation performed zero deletes and changed only three bidder ownership foreign keys plus the three newly inserted demo users. No bidder, tender, document, OCR/AI, verification, compliance, evidence, or audit row was deleted or moved.
 
 Cross-table role/profile consistency is not enforced by a database trigger in M02. Profile creation and role checks must be validated by the application/profile service in a later milestone; M02 deliberately does not implement RBAC or authentication.
 

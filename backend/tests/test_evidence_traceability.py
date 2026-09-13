@@ -651,14 +651,20 @@ def test_security_cross_bidder_isolation(sqlite_session):
     tender = sqlite_session.query(Tender).first()
     bidder_a = sqlite_session.query(Bidder).first()
 
+    bidder_user_b = User(
+        id=uuid.uuid4(),
+        email="foreign.bidder@secondlook.test",
+        full_name="Foreign Bidder Test User",
+        role="BIDDER",
+    )
     bidder_b = Bidder(
         id=uuid.uuid4(),
-        user_id=bidder_a.user_id,
+        user_id=bidder_user_b.id,
         legal_name="Foreign Corp B",
         gst_number="29ZZZZZ9999Z9Z9",
         pan_number="ZZZZZ9999Z",
     )
-    sqlite_session.add(bidder_b)
+    sqlite_session.add_all([bidder_user_b, bidder_b])
 
     req = TenderRequirement(
         id=uuid.uuid4(),

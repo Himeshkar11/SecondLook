@@ -669,12 +669,18 @@ def test_17_security_foreign_bidder_evidence_isolated(test_db):
 
     # Create Bidder B
     bidder_id_b = uuid.uuid4()
+    bidder_user_b = User(
+        id=uuid.uuid4(),
+        email="bidder.b@secondlook.test",
+        full_name="Bidder B Test User",
+        role="BIDDER",
+    )
     bidder_b = Bidder(
         id=bidder_id_b,
-        user_id=uuid.UUID(user_id),
+        user_id=bidder_user_b.id,
         legal_name="Bidder B Industries",
     )
-    session.add(bidder_b)
+    session.add_all([bidder_user_b, bidder_b])
 
     # Give verified GST to Bidder B ONLY
     gv_b = GovernmentVerification(
@@ -1064,8 +1070,14 @@ def test_30_multiple_bidders_evaluated_independently(test_db):
 
     # Create Bidder B
     bidder_id_b = uuid.uuid4()
-    bidder_b = Bidder(id=bidder_id_b, user_id=uuid.UUID(user_id), legal_name="Beta Corp")
-    session.add(bidder_b)
+    bidder_user_b = User(
+        id=uuid.uuid4(),
+        email="beta.bidder@secondlook.test",
+        full_name="Beta Bidder Test User",
+        role="BIDDER",
+    )
+    bidder_b = Bidder(id=bidder_id_b, user_id=bidder_user_b.id, legal_name="Beta Corp")
+    session.add_all([bidder_user_b, bidder_b])
 
     # Bidder A has valid GST
     gv_a = GovernmentVerification(

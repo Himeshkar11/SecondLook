@@ -1,10 +1,12 @@
-# M2 Blocker Analysis
+# M2 Blocker Analysis and Resolution
 
-## Blocker
+## Original Blocker and Human Decision
 
 Three bidder records are associated with one application user. The intended M2 invariant is one bidder profile per application user, but the live database currently contains three independent bidder records for that user.
 
-This investigation was read-only. No `DELETE`, `UPDATE`, `TRUNCATE`, `DROP`, `ALTER TABLE`, `MERGE`, or migration application was performed.
+The human decision confirmed that ABC Technologies Pvt Ltd (`...021`), XYZ Infrastructure Ltd (`...022`), and DEF Engineering Services Ltd (`...023`) are three separate development/demo organizations. They must not be merged or deleted, and their independent tender/document/OCR/AI history must remain attached to the original bidder IDs.
+
+Before mutation, the affected rows were captured in the local uncommitted `m2_reconciliation_snapshot.json` rollback/audit snapshot.
 
 ## User
 
@@ -98,6 +100,19 @@ The repository's current Supabase seed file only seeds `demo_government_records`
 
 The exact live insert source is therefore not present in the repository. The deterministic IDs, shared creation timestamp, three distinct demo-style names, and separate tender/document histories strongly suggest prior development or an external demo-data load. This is evidence of origin, not proof; no source-level claim can identify the creator conclusively.
 
+## Reconciliation Classification
+
+**B. Three legitimate organizations incorrectly attached to one legacy user** is the best-supported classification from the available data.
+
+Evidence:
+
+- The three rows have different legal names, registration numbers, GST numbers, and PAN numbers.
+- They belong to three different tenders with different references and statuses.
+- They have different bidder statuses: `verified`, `pending`, and `flagged`.
+- Two organizations have document histories, including one OCR-completed document.
+
+This classification does not establish the correct future application user for each organization. The current user is `admin@gem.gov.in`, `CPCL / Ministry of Petroleum`, active, with legacy role `admin`. Those fields identify a legacy procurement/system user, not a verified owner for any of the three private bidder organizations.
+
 ## Canonical Record
 
 **MANUAL RECONCILIATION REQUIRED**
@@ -109,6 +124,18 @@ No bidder can be safely selected as canonical:
 - `...023` has a different tender relationship and a flagged status.
 
 Selecting by oldest/newest, verified status, or bidder name would discard or orphan independent tender/document history and could change the meaning of existing compliance workflows. There are no compliance/evidence records to resolve, but the tender and document histories are meaningful and belong to distinct business names.
+
+The safest target structure is one application user per organization, with the existing bidder UUIDs preserved. The repository does not provide approved identity-provider subjects or ownership details for those organizations, so target users cannot be created or selected safely by automation. The current `admin@gem.gov.in` user must not be reassigned merely because it currently owns all three rows.
+
+## Reconciliation Table
+
+| Bidder ID | Organization | Tender count | Document count | Processing history | Current user | Proposed user | Proposed action | Reason | Confidence |
+|---|---|---:|---:|---|---|---|---|---|---|
+| `...021` | ABC Technologies Pvt Ltd | 1 | 2 | Uploaded/queued GST documents; no completed OCR/AI | Legacy user `...001` | Unknown; requires approved owner identity | Preserve bidder ID; reassign only after approval | Independent organization and tender history | High for separate organization; insufficient for target owner |
+| `...022` | XYZ Infrastructure Ltd | 1 | 2 | One OCR-completed document and one queued document | Legacy user `...001` | Unknown; requires approved owner identity | Preserve bidder ID; reassign only after approval | Independent organization and processing history | High for separate organization; insufficient for target owner |
+| `...023` | DEF Engineering Services Ltd | 1 | 0 | No document processing history | Legacy user `...001` | Unknown; requires approved owner identity | Preserve bidder ID; reassign only after approval | Independent organization, tender, and flagged status | High for separate organization; insufficient for target owner |
+
+The proposed action is deliberately preparatory, not an executed mutation. No target user IDs, emails, or identity-provider subjects are available to authorize reassignment.
 
 ## Data Preservation Requirements
 
@@ -135,9 +162,11 @@ No live `procurement_officer` role appeared in the grouped role result. The affe
 
 The M2 compatibility constraint allows `admin` and `procurement_officer` temporarily, alongside canonical `BIDDER` and `OFFICER`. No role values were changed. The affected user's role cannot be safely mapped until the three bidder records are reconciled and the user's intended product role is confirmed.
 
-## Migration Safety
+There are currently zero live `procurement_officer` users. No automatic `ADMIN -> OFFICER` or `ADMIN -> BIDDER` conversion is approved.
 
-The file `supabase/migrations/20260913_add_user_role_profiles.sql` was inspected and not applied.
+## Migration Result
+
+The file `supabase/migrations/20260913_add_user_role_profiles.sql` was applied in one PostgreSQL transaction after reconciliation.
 
 Its behavior is:
 
@@ -146,31 +175,45 @@ Its behavior is:
 - checks for duplicate `bidders.user_id` values and raises an exception before uniqueness enforcement;
 - creates `uq_bidders_user_id` only after the duplicate check passes;
 - creates `officer_profiles` with a unique `user_id` and `ON DELETE CASCADE` to `users`;
-- does not change existing role values;
-- does not delete, merge, or reassign bidder rows.
+- does not change the legacy `admin` role;
+- does not delete or merge bidder rows;
+- does not move any tender, document, OCR/AI, verification, compliance, evidence, or audit relationship.
 
-The duplicate guard is safe and correctly prevents an unsafe migration. The migration cannot apply successfully to the current live data until manual reconciliation is completed.
+The duplicate guard correctly prevented unsafe enforcement before reconciliation. After reconciliation, it passed and created `uq_bidders_user_id`, the role check, and `officer_profiles` with unique `user_id`.
+
+Reconciliation result:
+
+| Application user | Role | Bidder profile |
+|---|---|---|
+| `...001` `admin@gem.gov.in` | unchanged `admin` | none |
+| `...031` `demo.bidder.abc@secondlook.local` | `BIDDER` | `...021` ABC Technologies Pvt Ltd |
+| `...032` `demo.bidder.xyz@secondlook.local` | `BIDDER` | `...022` XYZ Infrastructure Ltd |
+| `...033` `demo.bidder.def@secondlook.local` | `BIDDER` | `...023` DEF Engineering Services Ltd |
+
+Users inserted: 3. Bidder ownership updates: 3. Rows deleted: 0.
 
 ## Test Environment
 
 - `backend/pytest.ini` exists and configures `pythonpath = .` and `testpaths = tests`.
-- No `backend/.venv` directory exists.
+- No `backend/.venv` directory exists; the repository root `.venv` is present and usable.
 - No `pyproject.toml`, `requirements-dev.txt`, `setup.cfg`, `tox.ini`, `Pipfile`, or `poetry.lock` was found.
 - `backend/requirements.txt` does not include pytest.
-- `pytest` is not available as a command and `python -m pytest` reports that the module is not installed.
+- The root `.venv` provides `pytest 9.1.1`.
+- Focused M2 tests ran from `backend` with the root environment: `6 passed`.
 - The read-only database queries were run through the installed `psycopg` driver by adapting the configured SQLAlchemy URL from `postgresql://` to `postgresql+psycopg://`.
-- No packages were installed during this investigation.
+- Full backend regression suite: `354 passed, 1 warning`.
+- Four existing isolation tests were updated to use separate test users for separate bidder profiles; no tests were weakened or removed.
 
-## Recommended Resolution
+## Executed Resolution and Verification
 
-1. Have the product/data owner identify whether the three names are intentionally separate businesses incorrectly attached to one application user, or whether the records are test/demo artifacts.
-2. Freeze changes to this user and these bidder rows while reconciliation is pending.
-3. For each row, capture an approved disposition: retain as the user-owned bidder, transfer to a separate application user, or mark as an explicitly deprecated demo record. Do not delete history.
-4. If multiple records remain valid, create separate application users or revise the one-profile invariant through an approved architecture decision; do not force a one-to-one constraint.
-5. Recheck all foreign-key and transitive references after the approved disposition.
-6. Classify the user's legacy `admin` role explicitly as `BIDDER` or `OFFICER` only after the profile decision; do not infer it from status or name.
-7. Apply the M2 migration only after the duplicate query returns zero rows and the role mapping has been reviewed.
-8. Re-run focused database tests and the existing regression suite in an environment with the repository's test dependencies installed.
+1. Confirmed three separate demo organizations; no canonical bidder was selected.
+2. Inserted three deterministic application users with role `BIDDER`; no passwords or Supabase Auth accounts were created.
+3. Updated only `bidders.user_id` for `...021`, `...022`, and `...023`.
+4. Left legacy user `...001` and role `admin` unchanged.
+5. Verified all six direct bidder foreign-key tables. Counts remain: 3 tender memberships, 4 documents, 0 verification jobs, 0 government verifications, 0 requirement evaluations, 0 compliance evaluations, and 0 audit references.
+6. Verified all three bidder IDs and all four document IDs remain present; document OCR/AI states are unchanged.
+7. Verified duplicate bidder-user groups = 0, legacy admin bidder profiles = 0, and each affected bidder has exactly one owner.
+8. Applied and verified the M2 migration, then ran focused and full regression tests.
 
 ## What MUST NOT Be Done
 
@@ -179,12 +222,15 @@ The duplicate guard is safe and correctly prevents an unsafe migration. The migr
 - Do not choose the oldest, newest, verified, pending, or flagged row as canonical without business approval.
 - Do not reassign tender memberships or documents automatically.
 - Do not update the live role from `admin` automatically.
-- Do not apply `20260913_add_user_role_profiles.sql` yet.
-- Do not start Milestone 03.
-- Do not modify backend code, frontend code, migrations, or live data during this blocker phase.
+- Do not merge or delete the three confirmed demo organizations.
+- Do not delete or move their historical tender/document/OCR/AI/verification/compliance/evidence/audit data.
+- Do not convert the legacy `admin` user into a bidder.
+- Do not create passwords, Supabase Auth accounts, authentication, or authorization in M2.
 
 ## Investigation Commands and Safety
 
-All live SQL used for this report was read-only `SELECT` against `information_schema` and domain tables. No write statement was executed. The repository checks performed were source reads, searches, and environment inspection only.
+The preflight SQL was read-only. The approved reconciliation used one guarded transaction with strict preconditions and no delete statements. The migration used a separate transaction. No commit or push was created in Git.
 
-**MILESTONE 02 REMAINS BLOCKED — AWAITING DATA RESOLUTION**
+M2 does not implement authentication, signup, frontend RBAC, route guards, dashboards, password handling, JWT handling, Supabase Auth, or authorization. M3 begins from the completed database identity/profile foundation.
+
+**MILESTONE 02 COMPLETE — RBAC DATABASE FOUNDATION READY FOR MILESTONE 03**

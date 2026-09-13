@@ -958,13 +958,19 @@ def test_31_multiple_bidders_evaluated_against_same_tender_requirements(sqlite_s
 
     # Create second bidder
     bidder2_id = uuid.uuid4()
+    bidder2_user = User(
+        id=uuid.uuid4(),
+        email="delta.bidder@secondlook.test",
+        full_name="Delta Bidder Test User",
+        role="BIDDER",
+    )
     bidder2 = Bidder(
         id=bidder2_id,
-        user_id=uuid.UUID(user_id),
+        user_id=bidder2_user.id,
         legal_name="Delta Infra Ltd",
         gst_number="29AAACD5678B1Z2",
     )
-    session.add(bidder2)
+    session.add_all([bidder2_user, bidder2])
     session.commit()
 
     # Create and approve requirement on tender

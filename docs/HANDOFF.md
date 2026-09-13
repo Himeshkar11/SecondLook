@@ -2,9 +2,9 @@
 
 ## Exact Stopping Point
 
-Milestone 02 implementation is blocked at the migration preflight. Authentication, RBAC, role middleware, signup, dashboards, landing redesign, and bid submission were not implemented. The repository is not ready for Milestone 03 until the duplicate bidder-user records are resolved and the additive migration applies successfully.
+Milestone 02 is complete. Authentication, RBAC, role middleware, signup, dashboards, landing redesign, and bid submission were not implemented. The duplicate bidder-user records were reconciled without deleting or merging any organization or history, and the additive migration applied successfully.
 
-The blocker investigation is documented in [docs/M2_BLOCKER_ANALYSIS.md](M2_BLOCKER_ANALYSIS.md). It was read-only and did not modify live data or apply the migration.
+The investigation and executed resolution are documented in [docs/M2_BLOCKER_ANALYSIS.md](M2_BLOCKER_ANALYSIS.md). The local rollback snapshot is `m2_reconciliation_snapshot.json` and is intentionally uncommitted.
 
 ## Repository Structure Discovered
 
@@ -85,8 +85,10 @@ No row-level security policies were found in the inspected migrations. Do not ad
 - `OfficerProfile` and `officer_profiles` provide a minimal one-to-one officer profile linked to `users.id` with `ON DELETE CASCADE`.
 - Existing IDs and foreign-key targets are unchanged.
 - The migration checks for duplicate bidder-user links and raises before creating the unique index; it never deletes or merges records.
-- Read-only live preflight found one duplicate group: user `00000000-0000-0000-0000-000000000001` has three bidder profiles. The migration was deliberately not applied.
-- Read-only live preflight found one legacy `admin` role. It remains temporarily allowed by the compatibility constraint and needs explicit classification later.
+- Human review confirmed three separate demo organizations and approved deterministic demo application identities.
+- User `...031` owns bidder `...021` ABC, user `...032` owns bidder `...022` XYZ, and user `...033` owns bidder `...023` DEF.
+- Legacy user `...001` remains `admin@gem.gov.in`, role `admin`, unchanged, with no bidder profile.
+- The migration was applied transactionally after the duplicate group was resolved. Live verification found zero duplicate groups and all three bidder owners exactly once.
 
 The affected bidder rows are:
 
@@ -95,6 +97,8 @@ The affected bidder rows are:
 - `00000000-0000-0000-0000-000000000023`: DEF Engineering Services Ltd; 1 different tender and no documents.
 
 Because more than one row contains independent tender/document history, no canonical bidder was selected. Manual business reconciliation is required.
+
+The user is `admin@gem.gov.in`, `CPCL / Ministry of Petroleum`, active, role `admin`. The three demo identities are application users only: no passwords, Supabase Auth accounts, or production identity claims were created.
 - Cross-table role/profile consistency is intentionally not enforced with triggers in M02. A later profile/application service must reject a BIDDER with an officer profile and an OFFICER with a bidder profile.
 
 ## Current Domain Architecture
@@ -221,15 +225,23 @@ Created:
 - `backend/app/models/officer_profile.py`
 - `backend/tests/test_user_role_foundation.py`
 - `supabase/migrations/20260913_add_user_role_profiles.sql`
+- `m2_reconciliation_snapshot.json`
 
 Modified:
 
 - `backend/app/models/user.py`
 - `backend/app/models/bidder.py`
 - `backend/app/models/__init__.py`
+- `backend/tests/test_compliance_orchestration.py`
+- `backend/tests/test_evidence_traceability.py`
+- `backend/tests/test_tender_requirement_management.py`
 - `docs/RBAC_ARCHITECTURE.md`
 - `docs/MILESTONE_STATUS.md`
 - `docs/HANDOFF.md`
+
+Created during blocker investigation:
+
+- `docs/M2_BLOCKER_ANALYSIS.md`
 
 ## Checks Performed
 
@@ -244,14 +256,14 @@ python -m compileall -q app tests/test_user_role_foundation.py
 python -m pytest -q tests/test_user_role_foundation.py
 ```
 
-`git diff --check` passed. Python compilation passed. The focused SQLite runtime probe rejected duplicate bidder profiles. The pytest command could not run because pytest is not installed in the active interpreter. A read-only live PostgreSQL preflight through `psycopg` found one three-row duplicate bidder-user group and one legacy `admin` role. The migration was not applied because its duplicate guard correctly blocks destructive/ambiguous enforcement. Pre-existing task-file and M01 documentation changes were not reverted or modified.
+`git diff --check` passed. Python compilation passed. The focused M2 suite passed: `6 passed`. The full backend regression suite passed: `354 passed, 1 warning`. The live PostgreSQL reconciliation committed `3` user inserts and `3` bidder ownership updates with `0` deletes. The migration applied successfully in one transaction and all live M2 constraints passed verification. Pre-existing task-file and unrelated documentation changes were not reverted or modified.
 
 The blocker investigation also verified the live bidder rows and dependency graph using read-only queries. No live `bids` table exists; there are six direct bidder foreign-key tables. No live verification, compliance, evidence, or direct audit-entity references exist for the three rows. The live officer-review tables are absent even though their repository models/migrations exist.
+
+The root `.venv` was used for validation. `pytest 9.1.1` is available there. Four existing isolation tests were updated to create separate test users for separate bidder profiles; no tests were weakened or removed.
 
 Observed results: `git diff --check` passed with no output. Because the three M01 files are untracked until a later review/staging step, `git diff --stat` and `git diff --name-only` listed only the pre-existing tracked `tasks/task*.md` deletions; `git status --short` showed the three docs alongside the pre-existing task changes. A direct file check confirmed all three docs exist and are non-empty.
 
 ## Next Milestone Instructions
 
-Milestone 03 is **Role-Based Signup**, but it must not begin until the bidder records are reconciled, the duplicate query returns zero rows, and the M2 migration is reviewed and applied. It must not add authentication architecture or RBAC middleware beyond the chosen existing identity provider.
-
-**MILESTONE 02 BLOCKED — DO NOT START MILESTONE 03**
+Milestone 03 is **Role-Based Signup**. It may begin from the completed M2 database identity/profile foundation, with the explicit product decision that the three existing organizations remain separate. M2 does not implement authentication, signup, frontend RBAC, route guards, password handling, JWT handling, Supabase Auth, or authorization.

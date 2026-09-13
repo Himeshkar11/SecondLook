@@ -1,7 +1,7 @@
 # SecondLook Milestone Status
 
 Current Milestone: 02  
-Status: BLOCKED
+Status: COMPLETE
 
 ## What Was Inspected
 
@@ -29,15 +29,21 @@ Status: BLOCKED
 - `backend/app/models/officer_profile.py`
 - `backend/tests/test_user_role_foundation.py`
 - `supabase/migrations/20260913_add_user_role_profiles.sql`
+- `docs/M2_BLOCKER_ANALYSIS.md`
+- `m2_reconciliation_snapshot.json`
 
 ## Files Modified
 
 - `backend/app/models/user.py`
 - `backend/app/models/bidder.py`
 - `backend/app/models/__init__.py`
+- `backend/tests/test_compliance_orchestration.py`
+- `backend/tests/test_evidence_traceability.py`
+- `backend/tests/test_tender_requirement_management.py`
 - `docs/RBAC_ARCHITECTURE.md`
 - `docs/MILESTONE_STATUS.md`
 - `docs/HANDOFF.md`
+- `docs/M2_BLOCKER_ANALYSIS.md`
 
 ## Tests / Checks
 
@@ -57,7 +63,7 @@ Results:
 - Direct file check: all three documentation files exist and are non-empty.
 - `python -m compileall -q app tests/test_user_role_foundation.py`: passed.
 - SQLite runtime probe: duplicate bidder profile rejected.
-- `python -m pytest -q tests/test_user_role_foundation.py`: unavailable because pytest is not installed.
+- `python -m pytest -q tests/test_user_role_foundation.py` using the root `.venv`: 6 passed in 2.82s.
 - Read-only live preflight through `psycopg`: found one legacy `admin` user and one duplicate bidder-user group containing three bidder profiles.
 
 Pre-existing task-file and M01 documentation changes were present before the M02 implementation and remain untouched outside the listed M02 files.
@@ -86,13 +92,22 @@ Pre-existing task-file and M01 documentation changes were present before the M02
 - Legacy/demo endpoints coexist with database-backed endpoints and need a staged authorization/retirement plan.
 - No RLS policies were found in the inspected migrations.
 
-## Blockers
+## Reconciliation Result
 
-The live PostgreSQL preflight succeeded through the installed `psycopg` driver and found one `user_id` with three bidder profiles. The M02 migration intentionally raises before creating `uq_bidders_user_id`, so it cannot apply until those existing records are manually classified and resolved without deleting historical data. The focused pytest suite was unavailable because pytest is not installed in the active interpreter.
+The human decision confirmed ABC Technologies Pvt Ltd, XYZ Infrastructure Ltd, and DEF Engineering Services Ltd are three separate development/demo bidder organizations. They were not merged or deleted. A local rollback snapshot was captured in `m2_reconciliation_snapshot.json` before mutation.
 
-Evidence: `SELECT user_id, COUNT(*) FROM bidders GROUP BY user_id HAVING COUNT(*) > 1` returned one group: `00000000-0000-0000-0000-000000000001`, count `3`.
+The exact transactional reconciliation was:
 
-The live role preflight also found one `admin` user. The compatibility check allows that legacy value temporarily; it must be explicitly classified before a later migration removes legacy roles.
+| User | Role | Bidder |
+|---|---|---|
+| `...001` `admin@gem.gov.in` | unchanged legacy `admin` | none |
+| `...031` `demo.bidder.abc@secondlook.local` | `BIDDER` | `...021` ABC Technologies Pvt Ltd |
+| `...032` `demo.bidder.xyz@secondlook.local` | `BIDDER` | `...022` XYZ Infrastructure Ltd |
+| `...033` `demo.bidder.def@secondlook.local` | `BIDDER` | `...023` DEF Engineering Services Ltd |
+
+Users inserted: 3. Bidder ownership updates: 3. Rows deleted: 0. Bidder/tender/document/OCR/AI/verification/compliance/evidence/audit deletions: 0.
+
+The migration `20260913_add_user_role_profiles.sql` was then applied in one PostgreSQL transaction. It created the unique bidder ownership index, canonical role check with legacy compatibility, and the one-to-one `officer_profiles` foundation.
 
 The following later decisions remain open:
 
@@ -104,9 +119,9 @@ The following later decisions remain open:
 
 These are later design decisions and do not require changing protected systems in M02.
 
-## M2 Blocker Investigation
+## M2 Verification
 
-Read-only investigation is complete. See [docs/M2_BLOCKER_ANALYSIS.md](M2_BLOCKER_ANALYSIS.md).
+The completed investigation and reconciliation are recorded in [docs/M2_BLOCKER_ANALYSIS.md](M2_BLOCKER_ANALYSIS.md).
 
 - Bidder `...021`: 1 tender, 2 documents.
 - Bidder `...022`: 1 different tender, 2 documents, 1 OCR-completed document.
@@ -114,8 +129,10 @@ Read-only investigation is complete. See [docs/M2_BLOCKER_ANALYSIS.md](M2_BLOCKE
 - No live bids table exists.
 - No live verification, compliance, evidence, or direct audit-entity references were found for these bidders.
 - The live `officer_reviews` and `requirement_reviews` tables are absent even though their migration/model definitions exist in the repository.
-- Multiple rows contain independent history, so no canonical record was selected.
-- Manual business/data reconciliation is required before applying the M2 migration.
+- All three bidder UUIDs remain present and each has exactly one owner.
+- All 3 `tender_bidders` rows and all 4 documents remain present with unchanged OCR/AI states.
+- Duplicate bidder-user groups: 0. Legacy admin bidder profiles: 0.
+- No live verification, compliance, evidence, or direct audit-entity references existed for these bidders; all counts remain unchanged at zero.
 
 ## Next Milestone
 
@@ -139,4 +156,11 @@ Milestone 03 — Role-Based Signup
 - modify historical migrations
 - implement authentication
 - implement RBAC middleware
-- apply the M02 migration before the duplicate bidder-user data is resolved
+- add authentication, signup, or authorization in M02
+
+Focused M2 tests: `6 passed`.
+Targeted regression repairs for the new ownership invariant: `4 passed`.
+Full backend regression suite: `354 passed, 1 warning`.
+ORM verification covers canonical roles, legacy compatibility, one bidder per user, duplicate bidder rejection, one officer profile per user, and preserved tender/review foreign keys.
+
+M2 does not implement authentication, signup, frontend RBAC, route guards, dashboards, password handling, JWT handling, Supabase Auth, or authorization. M3 starts from this completed database identity/profile foundation.
