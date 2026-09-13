@@ -25,17 +25,22 @@ from app.services.government_verification_service import (
     MissingIdentifierError,
     UnsupportedDocumentTypeError,
 )
-from app.services.compliance_service import ComplianceService, NoApprovedRequirementsError
+from app.schemas.audit_log import AuditLogListResponse, AuditLogRead
 from app.schemas.compliance import (
     BidderComplianceResponse,
     ComplianceEvaluationRead,
     ComplianceEvaluationSummaryItem,
+    EvaluationEvidenceTraceResponse,
+    EvidenceTraceChainRead,
+    NormalizedEvidenceItemRead,
     TenderExtractionRequest,
     TenderExtractionResponse,
     TenderRequirementCreate,
     TenderRequirementRead,
     TenderRequirementUpdate,
 )
+from app.services.audit_service import AuditService, get_audit_service
+from app.services.compliance_service import ComplianceService, NoApprovedRequirementsError
 from app.services.tender_service import TenderService
 from app.services.verification_service import VerificationService
 from app.workers.jobs import DocumentOCRStatus
@@ -204,6 +209,195 @@ def get_compliance_evaluation_endpoint(
         raise
     except Exception as exc:
         logger.error("Failed to retrieve compliance evaluation %s: %s", evaluation_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "RETRIEVAL_ERROR", "message": str(exc), "details": {}}},
+        ) from exc
+
+
+@router.get(
+    "/compliance/evaluations/{evaluation_id}/evidence",
+    response_model=EvaluationEvidenceTraceResponse,
+    tags=["Compliance"],
+    summary="Get full evidence trace chains for a compliance evaluation (Task 15)",
+)
+def get_compliance_evaluation_evidence_endpoint(
+    evaluation_id: str,
+    db: Session = Depends(get_db),
+):
+    """Retrieve complete evidence trace chains connecting requirements to original secure files."""
+    service = ComplianceService(db=db)
+    try:
+        return service.get_evaluation_evidence_traces(evaluation_id=evaluation_id)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": str(exc), "details": {}}},
+        ) from exc
+    except Exception as exc:
+        logger.error("Failed to retrieve evidence trace for evaluation %s: %s", evaluation_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "RETRIEVAL_ERROR", "message": str(exc), "details": {}}},
+        ) from exc
+
+
+@router.get(
+    "/compliance/evaluations/{evaluation_id}/audit",
+    response_model=list[AuditLogRead],
+    tags=["Compliance", "Audit"],
+    summary="Get audit events for a compliance evaluation (Task 15)",
+)
+def get_compliance_evaluation_audit_endpoint(
+    evaluation_id: str,
+    db: Session = Depends(get_db),
+):
+    """Retrieve audit events associated with a compliance evaluation run."""
+    service = AuditService(db=db)
+    try:
+        items, _ = service.list_events(entity_id=evaluation_id, limit=100)
+        return items
+    except Exception as exc:
+        logger.error("Failed to retrieve audit events for evaluation %s: %s", evaluation_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "RETRIEVAL_ERROR", "message": str(exc), "details": {}}},
+        ) from exc
+
+
+@router.get(
+    "/requirements/{requirement_id}/evidence",
+    response_model=EvidenceTraceChainRead,
+    tags=["Compliance"],
+    summary="Get evidence trace chain for a specific requirement (Task 15)",
+)
+@router.get(
+    "/tender-requirements/{requirement_id}/evidence",
+    response_model=EvidenceTraceChainRead,
+    tags=["Compliance"],
+    summary="Get evidence trace chain for a specific tender requirement (Task 15)",
+)
+def get_requirement_evidence_endpoint(
+    requirement_id: str,
+    bidder_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Retrieve evidence trace chain for an individual tender requirement."""
+    service = ComplianceService(db=db)
+    try:
+        trace = service.get_requirement_evidence_trace(requirement_id=requirement_id, bidder_id=bidder_id)
+        if not trace:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": {"code": "NOT_FOUND", "message": f"Requirement {requirement_id} not found", "details": {}}},
+            )
+        return trace
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to retrieve requirement evidence trace %s: %s", requirement_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "RETRIEVAL_ERROR", "message": str(exc), "details": {}}},
+        ) from exc
+
+
+@router.get(
+    "/evidence/{evidence_id}",
+    response_model=dict,
+    tags=["Compliance"],
+    summary="Get individual evidence item details (Task 15)",
+)
+def get_evidence_item_endpoint(
+    evidence_id: str,
+    db: Session = Depends(get_db),
+):
+    """Retrieve details and trace for a specific evidence item."""
+    try:
+        e_uuid = UUID(str(evidence_id))
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "INVALID_ID", "message": "Invalid evidence ID format", "details": {}}},
+        )
+
+    from app.models.government_verification import GovernmentVerification
+    from app.models.document import Document
+
+    gv = db.get(GovernmentVerification, e_uuid)
+    if gv:
+        return {
+            "evidence_id": str(gv.id),
+            "source_type": "GOVERNMENT_VERIFICATION",
+            "source": gv.source,
+            "document_id": str(gv.document_id) if gv.document_id else None,
+            "verification_id": str(gv.id),
+            "identifier": gv.identifier,
+            "status": gv.status,
+            "result": gv.verification_result,
+            "verified": gv.status == "COMPLETED" and gv.verification_result in ["MATCH", "VERIFIED", "CLEAR", "LISTED"],
+            "government_data": gv.government_data or {},
+            "field_results": gv.field_results or {},
+            "retrieved_at": gv.retrieved_at.isoformat() if gv.retrieved_at else None,
+        }
+
+    doc = db.get(Document, e_uuid)
+    if doc:
+        return {
+            "evidence_id": str(doc.id),
+            "source_type": "DOCUMENT",
+            "source": doc.document_type or "DOCUMENT",
+            "document_id": str(doc.id),
+            "file_name": doc.file_name,
+            "mime_type": doc.mime_type,
+            "file_size": doc.file_size,
+            "status": doc.status,
+            "ocr_status": doc.ocr_status,
+            "ai_status": doc.ai_status,
+            "ai_extraction": doc.ai_extraction,
+            "uploaded_at": doc.uploaded_at.isoformat() if doc.uploaded_at else None,
+        }
+
+    raise HTTPException(
+        status_code=404,
+        detail={"error": {"code": "NOT_FOUND", "message": f"Evidence {evidence_id} not found", "details": {}}},
+    )
+
+
+@router.get(
+    "/audit/events",
+    response_model=AuditLogListResponse,
+    tags=["Audit"],
+    summary="List system audit events with filtering (Task 15)",
+)
+def list_audit_events_endpoint(
+    entity_type: Optional[str] = None,
+    entity_id: Optional[str] = None,
+    action: Optional[str] = None,
+    user_id: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+):
+    """Query immutable audit events for security, verification, and compliance monitoring."""
+    service = AuditService(db=db)
+    try:
+        items, total = service.list_events(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            action=action,
+            user_id=user_id,
+            limit=limit,
+            offset=offset,
+        )
+        return AuditLogListResponse(
+            items=[AuditLogRead.model_validate(i) for i in items],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as exc:
+        logger.error("Failed to list audit events: %s", exc)
         raise HTTPException(
             status_code=500,
             detail={"error": {"code": "RETRIEVAL_ERROR", "message": str(exc), "details": {}}},
@@ -420,6 +614,18 @@ def get_document_access(document_id: str, expires_in: int = 3600, db: Session = 
         raise HTTPException(status_code=500, detail={"error": {"code": "STORAGE_ERROR", "message": "Failed to generate document access URL", "details": {}}}) from exc
     if access is None:
         raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Document not found", "details": {}}})
+
+    try:
+        AuditService(db=db).record_event(
+            action="DOCUMENT_ACCESSED",
+            entity_type="DOCUMENT",
+            entity_id=document_id,
+            details={"document_id": document_id, "expires_in": expires_in},
+            session=db,
+        )
+    except Exception as audit_err:
+        logger.warning("Failed to record document access audit event: %s", audit_err)
+
     return access
 
 

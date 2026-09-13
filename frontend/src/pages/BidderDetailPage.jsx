@@ -13,6 +13,7 @@ import {
   getComplianceEvaluation,
   getComplianceEvaluationsHistory,
 } from '../services/complianceService.js';
+import EvidenceTraceModal from '../components/compliance/EvidenceTraceModal.jsx';
 
 /**
  * BidderDetailPage — Dynamic Supabase-backed bidder profile.
@@ -36,6 +37,7 @@ export default function BidderDetailPage() {
   const [evaluationsHistory, setEvaluationsHistory] = useState([]);
   const [selectedEvalId, setSelectedEvalId] = useState(null);
   const [expandedReqs, setExpandedReqs] = useState({});
+  const [inspectingReq, setInspectingReq] = useState(null);
 
   const toggleReqExpand = (reqKey) => {
     setExpandedReqs((prev) => ({
@@ -651,6 +653,16 @@ export default function BidderDetailPage() {
                         {req.requirement_type && <Badge variant="neutral">{req.requirement_type}</Badge>}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setInspectingReq(req);
+                          }}
+                        >
+                          🔍 View Evidence
+                        </Button>
                         {getComplianceStatusBadge(req.status)}
                         <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
                           {isExpanded ? '▲' : '▼'}
@@ -975,6 +987,14 @@ export default function BidderDetailPage() {
           🛡 Start Verification →
         </Button>
       </div>
+
+      <EvidenceTraceModal
+        isOpen={!!inspectingReq}
+        onClose={() => setInspectingReq(null)}
+        requirement={inspectingReq}
+        evaluationId={selectedEvalId}
+        bidderId={bidderId}
+      />
     </PageContainer>
   );
 }

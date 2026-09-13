@@ -27,6 +27,7 @@ from app.integrations.registry import get_government_provider
 from app.integrations.validation import validate_gstin_format, validate_pan_format
 from app.models.document import Document
 from app.models.government_verification import GovernmentVerification
+from app.services.audit_service import get_audit_service
 
 logger = logging.getLogger(__name__)
 
@@ -277,6 +278,25 @@ class GovernmentVerificationService:
 
             session.commit()
             session.refresh(verification_record)
+
+            try:
+                get_audit_service(session).record_event(
+                    action="GOVERNMENT_VERIFICATION_PERFORMED",
+                    entity_type="GOVERNMENT_VERIFICATION",
+                    entity_id=verification_record.id,
+                    details={
+                        "verification_id": str(verification_record.id),
+                        "bidder_id": str(bidder_uuid),
+                        "source": norm_source,
+                        "identifier": identifier,
+                        "result": verification_record.verification_result,
+                        "status": verification_record.status,
+                    },
+                    session=session,
+                )
+            except Exception as audit_err:
+                logger.warning("Failed to record audit event for direct verification: %s", audit_err)
+
             return self._serialize_verification(verification_record)
 
         except Exception as exc:
@@ -451,6 +471,26 @@ class GovernmentVerificationService:
 
             session.commit()
             session.refresh(verification_record)
+
+            try:
+                get_audit_service(session).record_event(
+                    action="GOVERNMENT_VERIFICATION_PERFORMED",
+                    entity_type="GOVERNMENT_VERIFICATION",
+                    entity_id=verification_record.id,
+                    details={
+                        "verification_id": str(verification_record.id),
+                        "bidder_id": str(doc.bidder_id) if doc.bidder_id else None,
+                        "document_id": str(doc.id),
+                        "source": source,
+                        "identifier": identifier,
+                        "result": verification_record.verification_result,
+                        "status": verification_record.status,
+                    },
+                    session=session,
+                )
+            except Exception as audit_err:
+                logger.warning("Failed to record audit event for document verification: %s", audit_err)
+
             return self._serialize_verification(verification_record)
 
         except Exception as exc:

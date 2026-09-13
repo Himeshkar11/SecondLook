@@ -103,3 +103,29 @@ export async function getComplianceEvaluationsHistory(tenderId, bidderId) {
     `/api/v1/tenders/${encodeURIComponent(tenderId)}/bidders/${encodeURIComponent(bidderId)}/compliance/evaluations`
   );
 }
+
+/**
+ * Task 15 Evidence Traceability & Audit Trail APIs
+ */
+
+export async function getEvaluationEvidenceTraces(evaluationId) {
+  return apiClient(`/api/v1/compliance/evaluations/${encodeURIComponent(evaluationId)}/evidence`);
+}
+
+export async function getEvaluationAuditEvents(evaluationId) {
+  return apiClient(`/api/v1/compliance/evaluations/${encodeURIComponent(evaluationId)}/audit`);
+}
+
+export async function getRequirementEvidenceTrace(requirementId, bidderId = null) {
+  const query = bidderId ? `?bidder_id=${encodeURIComponent(bidderId)}` : '';
+  return apiClient(`/api/v1/requirements/${encodeURIComponent(requirementId)}/evidence${query}`);
+}
+
+export async function getDocumentAccessUrl(documentId, expiresIn = 3600) {
+  return apiClient(`/api/v1/documents/${encodeURIComponent(documentId)}/access?expires_in=${expiresIn}`);
+}
+
+export async function listAuditEvents(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return apiClient(`/api/v1/audit/events${query ? `?${query}` : ''}`);
+}

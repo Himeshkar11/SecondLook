@@ -30,12 +30,18 @@ from app.schemas.compliance import (
     ComplianceEvaluationRead,
     ComplianceEvaluationSummaryItem,
     ComplianceSummary,
+    EvaluationEvidenceTraceResponse,
+    EvidenceTraceChainRead,
+    FieldComparisonRead,
+    NormalizedEvidenceItemRead,
     RequirementEvaluationRead,
     TenderRequirementCreate,
     TenderRequirementUpdate,
 )
+from app.services.audit_service import get_audit_service
 from app.verification.compliance_engine import ComplianceEngine, Evidence
 from app.verification.evidence_resolver import EvidenceResolver
+from app.verification.explanation_engine import ExplanationEngine
 
 logger = logging.getLogger(__name__)
 
@@ -323,6 +329,7 @@ class ComplianceService:
                 except ValueError:
                     officer_uuid = None
 
+            prev_status = req.status
             now = datetime.now(timezone.utc)
             req.status = "APPROVED"
             req.approved_at = now
@@ -330,6 +337,26 @@ class ComplianceService:
             req.approved_by = officer_uuid
             session.commit()
             session.refresh(req)
+
+            try:
+                get_audit_service(session).record_event(
+                    action="REQUIREMENT_APPROVED",
+                    entity_type="TENDER_REQUIREMENT",
+                    entity_id=req.id,
+                    user_id=officer_uuid,
+                    details={
+                        "requirement_id": str(req.id),
+                        "tender_id": str(req.tender_id),
+                        "code": req.code,
+                        "title": req.title,
+                        "previous_status": prev_status,
+                        "new_status": "APPROVED",
+                    },
+                    session=session,
+                )
+            except Exception as audit_err:
+                logger.warning("Failed to record audit event for requirement approval: %s", audit_err)
+
             return req
         finally:
             if should_close:
@@ -349,11 +376,33 @@ class ComplianceService:
             if req.status == "ARCHIVED":
                 raise ValueError(f"Invalid state transition: Cannot reject ARCHIVED requirement {requirement_id}")
 
+            prev_status = req.status
             now = datetime.now(timezone.utc)
             req.status = "REJECTED"
             req.updated_at = now
             session.commit()
             session.refresh(req)
+
+            try:
+                get_audit_service(session).record_event(
+                    action="REQUIREMENT_REJECTED",
+                    entity_type="TENDER_REQUIREMENT",
+                    entity_id=req.id,
+                    user_id=None,
+                    details={
+                        "requirement_id": str(req.id),
+                        "tender_id": str(req.tender_id),
+                        "code": req.code,
+                        "title": req.title,
+                        "previous_status": prev_status,
+                        "new_status": "REJECTED",
+                        "reason": reason,
+                    },
+                    session=session,
+                )
+            except Exception as audit_err:
+                logger.warning("Failed to record audit event for requirement rejection: %s", audit_err)
+
             return req
         finally:
             if should_close:
@@ -758,6 +807,24 @@ class ComplianceService:
             session.commit()
             session.refresh(eval_record)
 
+            try:
+                get_audit_service(session).record_event(
+                    action="COMPLIANCE_EVALUATION_EXECUTED",
+                    entity_type="COMPLIANCE_EVALUATION",
+                    entity_id=eval_record.id,
+                    user_id=officer_id,
+                    details={
+                        "evaluation_id": str(eval_record.id),
+                        "tender_id": str(t_uuid),
+                        "bidder_id": str(b_uuid),
+                        "summary": summary_data,
+                        "requirements_count": len(approved_requirements),
+                    },
+                    session=session,
+                )
+            except Exception as audit_err:
+                logger.warning("Failed to record audit event for compliance evaluation: %s", audit_err)
+
             summary_schema = ComplianceSummary(**summary_data)
 
             return ComplianceEvaluationRead(
@@ -937,6 +1004,253 @@ class ComplianceService:
                 requirements=eval_read.requirements,
                 disclaimer=eval_read.disclaimer,
             )
+        finally:
+            if should_close:
+                session.close()
+
+    def get_evaluation_evidence_traces(
+        self, evaluation_id: str
+    ) -> EvaluationEvidenceTraceResponse:
+        """Fetch all evidence trace chains for a completed compliance evaluation run (Task 15).
+
+        Returns requirement -> rule -> evidence -> document/OCR/AI/government trace chains.
+        """
+        session, should_close = self._get_session()
+        try:
+            eval_uuid = uuid.UUID(str(evaluation_id))
+            eval_record = session.get(ComplianceEvaluation, eval_uuid)
+            if not eval_record:
+                raise KeyError(f"Compliance evaluation '{evaluation_id}' not found")
+
+            # Load requirement evaluations
+            stmt = (
+                select(RequirementEvaluation)
+                .where(RequirementEvaluation.evaluation_id == eval_uuid)
+            )
+            req_evals = list(session.execute(stmt).scalars().all())
+
+            # Load requirements map
+            req_map = {
+                req.id: req
+                for req in session.execute(
+                    select(TenderRequirement).where(TenderRequirement.tender_id == eval_record.tender_id)
+                ).scalars().all()
+            }
+
+            sorted_evals = sorted(
+                req_evals,
+                key=lambda x: (
+                    getattr(req_map.get(x.requirement_id), "display_order", 999),
+                    getattr(x, "evaluated_at", datetime.min),
+                )
+            )
+
+            traces: List[EvidenceTraceChainRead] = []
+            for ev in sorted_evals:
+                req = req_map.get(ev.requirement_id)
+                req_code = req.code if req else "REQ"
+                req_title = req.title if req else "Requirement"
+
+                rule_results = ev.rule_results or []
+                evidence_items = ev.evidence or []
+
+                # Resolve document and government traces
+                doc_trace = None
+                ocr_trace = None
+                ai_trace = None
+                gov_trace = None
+
+                # Find any document_id or verification_id referenced in evidence
+                doc_ids = [
+                    e.get("document_id")
+                    for e in evidence_items
+                    if isinstance(e, dict) and e.get("document_id")
+                ]
+                gov_ids = [
+                    e.get("verification_id")
+                    for e in evidence_items
+                    if isinstance(e, dict) and e.get("verification_id")
+                ]
+
+                if doc_ids:
+                    try:
+                        d_uuid = uuid.UUID(str(doc_ids[0]))
+                        doc = session.get(Document, d_uuid)
+                        if doc:
+                            doc_trace = {
+                                "document_id": str(doc.id),
+                                "file_name": doc.file_name,
+                                "document_type": doc.document_type,
+                                "mime_type": doc.mime_type,
+                                "file_size": doc.file_size,
+                                "status": doc.status,
+                                "uploaded_at": doc.uploaded_at.isoformat() if doc.uploaded_at else None,
+                            }
+                            ocr_trace = {
+                                "status": doc.ocr_status,
+                                "text": doc.ocr_text,
+                                "error": doc.ocr_error,
+                                "completed_at": doc.ocr_completed_at.isoformat() if doc.ocr_completed_at else None,
+                            }
+                            ai_trace = {
+                                "status": doc.ai_status,
+                                "model": doc.ai_model,
+                                "extraction": doc.ai_extraction,
+                                "error": doc.ai_error,
+                                "completed_at": doc.ai_completed_at.isoformat() if doc.ai_completed_at else None,
+                            }
+                    except (ValueError, TypeError):
+                        pass
+
+                if gov_ids:
+                    try:
+                        g_uuid = uuid.UUID(str(gov_ids[0]))
+                        gv = session.get(GovernmentVerification, g_uuid)
+                        if gv:
+                            gov_trace = {
+                                "verification_id": str(gv.id),
+                                "source": gv.source,
+                                "identifier": gv.identifier,
+                                "status": gv.status,
+                                "verification_result": gv.verification_result,
+                                "retrieved_at": gv.retrieved_at.isoformat() if gv.retrieved_at else None,
+                                "government_data": gv.government_data or {},
+                                "field_results": gv.field_results or {},
+                            }
+                    except (ValueError, TypeError):
+                        pass
+
+                trace_chain = ExplanationEngine.build_trace_chain(
+                    requirement_id=str(ev.requirement_id),
+                    requirement_code=req_code,
+                    requirement_title=req_title,
+                    evaluation_status=ev.status,
+                    rule_results=rule_results,
+                    evidence_items=evidence_items,
+                    document_metadata=doc_trace,
+                    ocr_trace=ocr_trace,
+                    ai_trace=ai_trace,
+                    government_trace=gov_trace,
+                    evaluation_id=str(eval_record.id),
+                )
+
+                field_comparisons = ExplanationEngine.build_field_comparisons(
+                    rule_configs=req.rule_config or [] if req else [],
+                    rule_results=rule_results,
+                    evidence_items=evidence_items,
+                )
+
+                norm_items_read: List[NormalizedEvidenceItemRead] = []
+                for item in trace_chain.evidence_items:
+                    norm_items_read.append(
+                        NormalizedEvidenceItemRead(
+                            evidence_id=item.evidence_id,
+                            source_type=item.source_type,
+                            source=item.source,
+                            document_id=item.document_id,
+                            verification_id=item.verification_id,
+                            extraction_id=item.extraction_id,
+                            field=item.field,
+                            value=item.value,
+                            expected_value=item.expected_value,
+                            document_value=item.document_value,
+                            government_value=item.government_value,
+                            result=item.result,
+                            retrieved_at=item.retrieved_at,
+                            is_demo=item.is_demo,
+                            verified=item.verified,
+                            field_comparisons=[
+                                FieldComparisonRead(
+                                    field=fc.field,
+                                    expected_value=fc.expected_value,
+                                    document_value=fc.document_value,
+                                    government_value=fc.government_value,
+                                    result=fc.result,
+                                )
+                                for fc in field_comparisons
+                            ],
+                            raw_data=item.raw_data,
+                            ai_extracted=item.ai_extracted,
+                            conflict_detected=item.conflict_detected,
+                            conflict_details=item.conflict_details,
+                            explanation=item.explanation,
+                            metadata=item.metadata,
+                        )
+                    )
+
+                traces.append(
+                    EvidenceTraceChainRead(
+                        requirement_id=str(ev.requirement_id),
+                        requirement_code=req_code,
+                        requirement_title=req_title,
+                        evaluation_id=str(eval_record.id),
+                        evaluation_status=ev.status,
+                        explanation=trace_chain.explanation,
+                        rule_results=rule_results,
+                        evidence_items=norm_items_read,
+                        document_trace=doc_trace,
+                        ocr_trace=ocr_trace,
+                        ai_trace=ai_trace,
+                        government_trace=gov_trace,
+                    )
+                )
+
+            return EvaluationEvidenceTraceResponse(
+                evaluation_id=eval_record.id,
+                tender_id=eval_record.tender_id,
+                bidder_id=eval_record.bidder_id,
+                traces=traces,
+            )
+        finally:
+            if should_close:
+                session.close()
+
+    def get_requirement_evidence_trace(
+        self, requirement_id: str, bidder_id: Optional[str] = None
+    ) -> Optional[EvidenceTraceChainRead]:
+        """Fetch trace chain for a specific requirement's latest evaluation."""
+        session, should_close = self._get_session()
+        try:
+            req_uuid = uuid.UUID(str(requirement_id))
+            req = session.get(TenderRequirement, req_uuid)
+            if not req:
+                return None
+
+            stmt = select(RequirementEvaluation).where(RequirementEvaluation.requirement_id == req_uuid)
+            if bidder_id:
+                try:
+                    b_uuid = uuid.UUID(str(bidder_id))
+                    stmt = stmt.where(RequirementEvaluation.bidder_id == b_uuid)
+                except ValueError:
+                    pass
+            stmt = stmt.order_by(RequirementEvaluation.evaluated_at.desc())
+            ev = session.execute(stmt).scalars().first()
+            if not ev:
+                trace_chain = ExplanationEngine.build_trace_chain(
+                    requirement_id=str(req.id),
+                    requirement_code=req.code,
+                    requirement_title=req.title,
+                    evaluation_status="NOT_VERIFIED",
+                    rule_results=[],
+                    evidence_items=[],
+                )
+                return EvidenceTraceChainRead(
+                    requirement_id=str(req.id),
+                    requirement_code=req.code,
+                    requirement_title=req.title,
+                    evaluation_status="NOT_VERIFIED",
+                    explanation=trace_chain.explanation,
+                    rule_results=[],
+                    evidence_items=[],
+                )
+
+            if ev.evaluation_id:
+                eval_traces = self.get_evaluation_evidence_traces(str(ev.evaluation_id))
+                for t in eval_traces.traces:
+                    if t.requirement_id == str(req.id):
+                        return t
+
+            return None
         finally:
             if should_close:
                 session.close()

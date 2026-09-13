@@ -210,6 +210,59 @@ class ComplianceEvaluationSummaryItem(BaseModel):
     status: str
     summary: Optional[Dict[str, Any]] = None
     created_at: str
-    completed_at: Optional[str] = None
-
     model_config = {"from_attributes": True}
+
+
+class FieldComparisonRead(BaseModel):
+    field: str
+    expected_value: Optional[Any] = None
+    document_value: Optional[Any] = None
+    government_value: Optional[Any] = None
+    result: str = "MATCH"  # MATCH, MISMATCH, UNAVAILABLE
+
+
+class NormalizedEvidenceItemRead(BaseModel):
+    evidence_id: str
+    source_type: str
+    source: str
+    document_id: Optional[str] = None
+    verification_id: Optional[str] = None
+    extraction_id: Optional[str] = None
+    field: Optional[str] = None
+    value: Optional[Any] = None
+    expected_value: Optional[Any] = None
+    document_value: Optional[Any] = None
+    government_value: Optional[Any] = None
+    result: Optional[str] = None
+    retrieved_at: Optional[str] = None
+    is_demo: bool = True
+    verified: bool = False
+    field_comparisons: List[FieldComparisonRead] = Field(default_factory=list)
+    raw_data: Dict[str, Any] = Field(default_factory=dict)
+    ai_extracted: Dict[str, Any] = Field(default_factory=dict)
+    conflict_detected: bool = False
+    conflict_details: Optional[Dict[str, Any]] = None
+    explanation: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class EvidenceTraceChainRead(BaseModel):
+    requirement_id: str
+    requirement_code: str
+    requirement_title: str
+    evaluation_id: Optional[str] = None
+    evaluation_status: str = "NOT_VERIFIED"
+    explanation: str = ""
+    rule_results: List[Dict[str, Any]] = Field(default_factory=list)
+    evidence_items: List[NormalizedEvidenceItemRead] = Field(default_factory=list)
+    document_trace: Optional[Dict[str, Any]] = None
+    ocr_trace: Optional[Dict[str, Any]] = None
+    ai_trace: Optional[Dict[str, Any]] = None
+    government_trace: Optional[Dict[str, Any]] = None
+
+
+class EvaluationEvidenceTraceResponse(BaseModel):
+    evaluation_id: uuid.UUID
+    tender_id: uuid.UUID
+    bidder_id: uuid.UUID
+    traces: List[EvidenceTraceChainRead] = Field(default_factory=list)
