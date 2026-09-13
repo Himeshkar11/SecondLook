@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import router as api_router
+from app.review.router import review_router  # Task 16
 
 app = FastAPI(
     title="SecondLook API",
@@ -17,6 +18,8 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
+app.include_router(review_router)  # Task 16 — Officer Review
+
 
 
 @app.get("/")

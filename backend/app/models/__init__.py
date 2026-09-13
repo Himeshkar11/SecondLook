@@ -8,6 +8,7 @@ from .verification_result import VerificationResult
 from .audit_log import AuditLog
 from .government_verification import GovernmentVerification
 from .tender_requirement import ComplianceEvaluation, RequirementEvaluation, TenderRequirement
+from app.review.models import OfficerReview, RequirementReview  # Task 16
 
 __all__ = [
     "Base",
@@ -22,5 +23,7 @@ __all__ = [
     "TenderRequirement",
     "RequirementEvaluation",
     "ComplianceEvaluation",
+    "OfficerReview",
+    "RequirementReview",
 ]
 

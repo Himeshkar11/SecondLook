@@ -14,6 +14,16 @@ import {
   getComplianceEvaluationsHistory,
 } from '../services/complianceService.js';
 import EvidenceTraceModal from '../components/compliance/EvidenceTraceModal.jsx';
+import ComplianceSummary from '../components/compliance/ComplianceSummary.jsx';
+import RequirementReview from '../components/compliance/RequirementReview.jsx';
+import OfficerReviewPanel from '../components/compliance/OfficerReviewPanel.jsx';
+import {
+  getReviewPayload,
+  createReview,
+  updateRequirementReview,
+  updateOfficerDecision,
+  completeReview,
+} from '../services/reviewService.js';
 
 /**
  * BidderDetailPage — Dynamic Supabase-backed bidder profile.
@@ -38,6 +48,11 @@ export default function BidderDetailPage() {
   const [selectedEvalId, setSelectedEvalId] = useState(null);
   const [expandedReqs, setExpandedReqs] = useState({});
   const [inspectingReq, setInspectingReq] = useState(null);
+
+  // Task 16 — Officer Review state
+  const [reviewPayload, setReviewPayload] = useState(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [showReview, setShowReview] = useState(false);
 
   const toggleReqExpand = (reqKey) => {
     setExpandedReqs((prev) => ({
@@ -146,9 +161,75 @@ export default function BidderDetailPage() {
     }
   };
 
+  // Task 16 — load or refresh review payload
+  const loadReviewPayload = useCallback(async (evalId) => {
+    if (!evalId) return;
+    setReviewLoading(true);
+    try {
+      const payload = await getReviewPayload(evalId);
+      setReviewPayload(payload);
+    } catch (err) {
+      console.error('Failed to load review payload:', err);
+      setReviewPayload(null);
+    } finally {
+      setReviewLoading(false);
+    }
+  }, []);
+
+  const handleStartReview = async () => {
+    if (!selectedEvalId) return;
+    setReviewLoading(true);
+    try {
+      const payload = await createReview(selectedEvalId, {});
+      setReviewPayload(payload);
+      setShowReview(true);
+    } catch (err) {
+      console.error('Failed to start review:', err);
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  const handleMarkReviewed = async (requirementResultId, comment) => {
+    if (!selectedEvalId) return;
+    await updateRequirementReview(selectedEvalId, requirementResultId, {
+      status: 'REVIEWED',
+      comment,
+    });
+    await loadReviewPayload(selectedEvalId);
+  };
+
+  const handleMarkFlagged = async (requirementResultId, comment) => {
+    if (!selectedEvalId) return;
+    await updateRequirementReview(selectedEvalId, requirementResultId, {
+      status: 'FLAGGED',
+      comment,
+    });
+    await loadReviewPayload(selectedEvalId);
+  };
+
+  const handleSaveDecision = async (body) => {
+    if (!selectedEvalId) return;
+    await updateOfficerDecision(selectedEvalId, body);
+    await loadReviewPayload(selectedEvalId);
+  };
+
+  const handleCompleteReview = async () => {
+    if (!selectedEvalId) return;
+    await completeReview(selectedEvalId);
+    await loadReviewPayload(selectedEvalId);
+  };
+
   useEffect(() => {
     fetchBidderDetails();
   }, [fetchBidderDetails]);
+
+  // Auto-load review payload when evaluation changes
+  useEffect(() => {
+    if (selectedEvalId) {
+      loadReviewPayload(selectedEvalId);
+    }
+  }, [selectedEvalId, loadReviewPayload]);
 
   if (loading) {
     return (
@@ -849,6 +930,119 @@ export default function BidderDetailPage() {
           </div>
         )}
       </div>
+
+
+      {/* Task 16 — Officer Review Section */}
+      {selectedEvalId && compliance?.status === 'COMPLETED' && (
+        <div
+          style={{
+            backgroundColor: 'var(--color-bg-card)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--color-border)',
+            boxShadow: 'var(--shadow-xs)',
+            overflow: 'hidden',
+            marginTop: 'var(--space-4)',
+          }}
+        >
+          {/* Section header */}
+          <div
+            style={{
+              padding: 'var(--space-4) var(--space-5)',
+              borderBottom: '1px solid var(--color-border)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 'var(--space-3)',
+            }}
+          >
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                <h3 style={{ fontSize: 'var(--font-size-base)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-primary)', margin: 0 }}>
+                  Officer Review
+                </h3>
+                <Badge variant="neutral">Task 16</Badge>
+                {reviewPayload?.review?.status === 'COMPLETED' && <Badge variant="success">Completed</Badge>}
+                {reviewPayload?.review?.status === 'IN_PROGRESS' && <Badge variant="info">In Progress</Badge>}
+              </div>
+              <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+                The system recommends and explains. The Procurement Officer decides.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+              {!reviewPayload?.review && !reviewLoading && (
+                <Button variant="primary" size="sm" onClick={handleStartReview} disabled={reviewLoading}>
+                  📋 Start Officer Review
+                </Button>
+              )}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowReview((v) => !v)}
+              >
+                {showReview ? 'Hide Review' : 'Show Review'}
+              </Button>
+            </div>
+          </div>
+
+          {showReview && (
+            <div style={{ padding: 'var(--space-5)' }}>
+              {reviewLoading ? (
+                <Loading message="Loading review…" />
+              ) : reviewPayload ? (
+                <>
+                  {/* Compliance summary */}
+                  <ComplianceSummary
+                    summary={reviewPayload.summary}
+                    review={reviewPayload.review}
+                  />
+
+                  {/* Requirement-level reviews */}
+                  {reviewPayload.review && (
+                    <div style={{ marginBottom: '20px' }}>
+                      <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 'var(--font-weight-bold)', color: 'var(--color-text-primary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 'var(--space-3)' }}>
+                        Requirement Review ({reviewPayload.requirements?.length || 0})
+                      </div>
+                      {(reviewPayload.requirements || []).map((item) => (
+                        <RequirementReview
+                          key={item.requirement_result_id}
+                          item={item}
+                          onMarkReviewed={handleMarkReviewed}
+                          onMarkFlagged={handleMarkFlagged}
+                          onViewEvidence={(reqItem) => setInspectingReq({
+                            ...reqItem,
+                            requirement_id: reqItem.requirement_id,
+                            title: reqItem.requirement_title,
+                          })}
+                          disabled={reviewPayload.review?.status === 'COMPLETED'}
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Officer decision panel */}
+                  {reviewPayload.review && (
+                    <OfficerReviewPanel
+                      review={reviewPayload.review}
+                      onSaveDecision={handleSaveDecision}
+                      onComplete={handleCompleteReview}
+                      loading={reviewLoading}
+                    />
+                  )}
+                </>
+              ) : (
+                <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                  No review started yet.
+                  <br />
+                  <Button variant="primary" size="sm" onClick={handleStartReview} style={{ marginTop: 'var(--space-3)' }}>
+                    Start Officer Review
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
 
       {/* Documents table */}
