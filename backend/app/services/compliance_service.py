@@ -111,6 +111,28 @@ class ComplianceService:
             return SessionLocal(), True
         raise RuntimeError("No database connection available")
 
+    @staticmethod
+    def _validate_rule_configuration(rule_type: Optional[str], parameters: Optional[Dict[str, Any]], rule_config: List[Dict[str, Any]]) -> None:
+        supported = ComplianceEngine.SUPPORTED_OPERATORS
+        if rule_type and rule_type.upper() not in supported:
+            raise ValueError(f"Unsupported rule type '{rule_type}'")
+        for rule in rule_config:
+            if not isinstance(rule, dict) or not rule.get("source") or not rule.get("field"):
+                raise ValueError("Each rule must define source and field")
+            operator = str(rule.get("operator", "EQUALS")).upper()
+            if operator not in supported:
+                raise ValueError(f"Unsupported rule operator '{operator}'")
+            if operator not in {"FIELD_EXISTS", "FIELD_NOT_EMPTY"} and "expected_value" not in rule:
+                raise ValueError(f"Rule operator '{operator}' requires expected_value")
+        if parameters and parameters.get("source"):
+            parameter_rule = {
+                "source": parameters.get("source"),
+                "field": parameters.get("field"),
+                "operator": parameters.get("operator", "EQUALS"),
+                "expected_value": parameters.get("expected_value"),
+            }
+            ComplianceService._validate_rule_configuration(None, None, [parameter_rule])
+
     def get_tender_requirements(
         self, tender_id: str, status: Optional[str] = None
     ) -> List[TenderRequirement]:
@@ -175,6 +197,7 @@ class ComplianceService:
                     "operator": params.get("operator", "EQUALS"),
                     "expected_value": params.get("expected_value", "ACTIVE"),
                 }]
+            self._validate_rule_configuration(data.rule_type, data.parameters, rule_config)
 
             creator_uuid = None
             if user_id:
@@ -207,6 +230,16 @@ class ComplianceService:
             session.add(req)
             session.commit()
             session.refresh(req)
+            try:
+                get_audit_service(session).record_event(
+                    action="REQUIREMENT_CREATED",
+                    entity_type="TENDER_REQUIREMENT",
+                    entity_id=req.id,
+                    details={"tender_id": str(req.tender_id), "status": req.status, "code": req.code},
+                    session=session,
+                )
+            except Exception as audit_err:
+                logger.warning("Failed to record requirement creation audit: %s", audit_err)
             return req
         finally:
             if should_close:
@@ -261,6 +294,7 @@ class ComplianceService:
             if data.rule_config is not None and data.rule_config != req.rule_config:
                 req.rule_config = data.rule_config
                 content_changed = True
+                self._validate_rule_configuration(req.rule_type, req.parameters, data.rule_config)
             if data.source_text is not None:
                 req.source_text = data.source_text
             if data.source_page is not None:
@@ -322,6 +356,12 @@ class ComplianceService:
                     f"with status {req.status}. Only requirements in AI_SUGGESTED, DRAFT, or UNDER_REVIEW can be approved."
                 )
 
+            self._validate_rule_configuration(
+                req.rule_type,
+                req.parameters,
+                req.rule_config if isinstance(req.rule_config, list) else [],
+            )
+
             officer_uuid = None
             if officer_id:
                 try:
@@ -379,6 +419,7 @@ class ComplianceService:
             prev_status = req.status
             now = datetime.now(timezone.utc)
             req.status = "REJECTED"
+            req.rejection_reason = reason
             req.updated_at = now
             session.commit()
             session.refresh(req)

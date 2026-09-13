@@ -55,6 +55,7 @@ class TenderRequirementCreate(BaseModel):
     source_text: Optional[str] = None
     source_page: Optional[int] = None
     source_section: Optional[str] = None
+    rejection_reason: Optional[str] = None
 
 
 class TenderRequirementUpdate(BaseModel):
@@ -93,6 +94,7 @@ class TenderRequirementRead(BaseModel):
     source_text: Optional[str] = None
     source_page: Optional[int] = None
     source_section: Optional[str] = None
+    rejection_reason: Optional[str] = None
     created_by: Optional[uuid.UUID] = None
     approved_by: Optional[uuid.UUID] = None
     created_at: Optional[Any] = None

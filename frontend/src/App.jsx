@@ -11,6 +11,7 @@ import VerificationPage from './pages/VerificationPage.jsx';
 import AuditPage from './pages/AuditPage.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
 import PlaceholderPage from './pages/PlaceholderPage.jsx';
+import TenderWorkflowPage from './pages/TenderWorkflowPage.jsx';
 
 /**
  * SecondLook Frontend Application Entry Route Tree — M20
@@ -24,6 +25,8 @@ export default function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/tenders" element={<TendersPage />} />
         <Route path="/tenders/:id" element={<TenderDetailPage />} />
+        <Route path="/tenders/:id/dashboard" element={<TenderWorkflowPage />} />
+        <Route path="/tenders/:id/workflow" element={<TenderWorkflowPage />} />
         <Route path="/bidders" element={<BiddersPage />} />
         <Route path="/bidders/:id" element={<BidderDetailPage />} />
         <Route path="/documents" element={<DocumentsPage />} />

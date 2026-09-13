@@ -345,6 +345,9 @@ export default function TenderDetailPage() {
           <Button variant="secondary" size="sm" onClick={() => navigate('/tenders')}>
             ← All Tenders
           </Button>
+          <Button variant="secondary" size="sm" onClick={() => navigate(`/tenders/${encodeURIComponent(tenderId)}/dashboard`)}>
+            Evaluation Dashboard
+          </Button>
           <Button
             variant="primary"
             size="sm"

@@ -1,0 +1,4 @@
+import React from 'react';
+import RequirementStatusBadge from './RequirementStatusBadge.jsx';
+import RequirementSource from './RequirementSource.jsx';
+export default function RequirementCard({ requirement, onApprove, onReject, onEdit }) { return <article style={{ border: '1px solid #d9e2ec', padding: 16, background: '#fff' }}><h3>{requirement.title}</h3><p>{requirement.description}</p><p>{requirement.type} · {requirement.mandatory ? 'Mandatory' : 'Optional'} · <RequirementStatusBadge status={requirement.status} /></p><RequirementSource requirement={requirement} /><button type="button" onClick={() => onEdit?.(requirement)}>Edit</button>{requirement.status !== 'APPROVED' && <><button type="button" onClick={() => onApprove?.(requirement)}>Approve</button><button type="button" onClick={() => onReject?.(requirement)}>Reject</button></>}</article>; }

@@ -43,6 +43,8 @@ from app.services.audit_service import AuditService, get_audit_service
 from app.services.compliance_service import ComplianceService, NoApprovedRequirementsError
 from app.services.tender_service import TenderService
 from app.services.verification_service import VerificationService
+from app.models.document import Document
+from app.models.tender_requirement import TenderRequirement
 from app.workers.jobs import DocumentOCRStatus
 from app.workers.worker import DocumentAIWorker, DocumentOCRWorker, DocumentVerificationWorker
 
@@ -548,7 +550,15 @@ async def upload_tender_document(
 
         def _run_ocr_async(d_id: str, f_bytes: bytes):
             worker = DocumentOCRWorker()
-            worker.process_document_by_id(d_id, content_override=f_bytes)
+            job = worker.process_document_by_id(d_id, content_override=f_bytes)
+            if job and job.status == DocumentOCRStatus.OCR_COMPLETED:
+                ai_job = DocumentAIWorker().process_document_by_id(d_id)
+                if ai_job and getattr(ai_job, "status", None) == "AI_COMPLETED":
+                    doc = DocumentService().get_document(d_id)
+                    if doc and doc.get("tender_id"):
+                        ComplianceService().extract_tender_requirements(
+                            tender_id=doc["tender_id"], document_id=d_id
+                        )
 
         background_tasks.add_task(_run_ocr_async, doc_id, content)
 
@@ -560,6 +570,59 @@ async def upload_tender_document(
     except Exception as exc:
         logger.error("Failed to upload tender document: %s", exc)
         raise HTTPException(status_code=500, detail={"error": {"code": "UPLOAD_FAILED", "message": "Failed to upload tender document", "details": {}}}) from exc
+
+
+@router.post(
+    "/tenders/{tender_id}/documents/{document_id}/process",
+    tags=["Tenders", "Documents"],
+    summary="Process a tender document through existing OCR and AI workers",
+)
+def process_tender_document(
+    tender_id: str,
+    document_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    try:
+        document_uuid = UUID(document_id)
+    except (ValueError, TypeError):
+        document_uuid = None
+    doc = db.get(Document, document_uuid) if document_uuid else None
+    if doc is None or str(doc.tender_id) != tender_id:
+        raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Tender document not found", "details": {}}})
+
+    def _process():
+        ocr_job = DocumentOCRWorker().process_document_by_id(document_id)
+        if ocr_job and ocr_job.status == DocumentOCRStatus.OCR_COMPLETED:
+            ai_job = DocumentAIWorker().process_document_by_id(document_id)
+            if ai_job and getattr(ai_job, "status", None) == "AI_COMPLETED":
+                ComplianceService().extract_tender_requirements(tender_id=tender_id, document_id=document_id)
+
+    background_tasks.add_task(_process)
+    return {"document_id": document_id, "status": "QUEUED"}
+
+
+@router.get(
+    "/tenders/{tender_id}/documents/{document_id}/processing",
+    tags=["Tenders", "Documents"],
+    summary="Get tender document OCR and AI processing status",
+)
+def get_tender_document_processing(tender_id: str, document_id: str, db: Session = Depends(get_db)):
+    try:
+        document_uuid = UUID(document_id)
+    except (ValueError, TypeError):
+        document_uuid = None
+    doc = db.get(Document, document_uuid) if document_uuid else None
+    if doc is None or str(doc.tender_id) != tender_id:
+        raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Tender document not found", "details": {}}})
+    count = db.query(TenderRequirement).filter(TenderRequirement.source_document_id == doc.id).count()
+    return {
+        "document_id": document_id,
+        "ocr_status": doc.ocr_status,
+        "ai_status": doc.ai_status,
+        "requirements_found": count,
+        "last_updated": doc.updated_at.isoformat() if doc.updated_at else None,
+    }
 
 
 @router.get(
@@ -889,6 +952,7 @@ def _to_requirement_read(r) -> TenderRequirementRead:
         source_text=getattr(r, "source_text", None),
         source_page=getattr(r, "source_page", None),
         source_section=getattr(r, "source_section", None),
+        rejection_reason=getattr(r, "rejection_reason", None),
         created_by=getattr(r, "created_by", None),
         approved_by=getattr(r, "approved_by", None),
         created_at=r.created_at.isoformat() if hasattr(r.created_at, "isoformat") else r.created_at,

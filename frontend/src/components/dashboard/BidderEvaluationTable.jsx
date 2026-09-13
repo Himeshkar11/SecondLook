@@ -1,0 +1,6 @@
+import React from 'react';
+import EvaluationStatusBadge from './EvaluationStatusBadge.jsx';
+
+export default function BidderEvaluationTable({ bidders = [], onOpen }) {
+  return <div style={{ overflowX: 'auto', background: '#fff', border: '1px solid #d9e2ec' }}><table style={{ width: '100%', borderCollapse: 'collapse' }}><thead><tr>{['Bidder', 'Evaluation', 'Passed', 'Failed', 'Not verified', 'Review', 'Action'].map((label) => <th key={label} style={{ textAlign: 'left', padding: 12, borderBottom: '1px solid #d9e2ec', fontSize: 12 }}>{label}</th>)}</tr></thead><tbody>{bidders.map((bidder) => <tr key={bidder.bidder_id}><td style={{ padding: 12 }}>{bidder.bidder_name}</td><td style={{ padding: 12 }}><EvaluationStatusBadge status={bidder.evaluation_status} /></td><td style={{ padding: 12 }}>{bidder.passed}</td><td style={{ padding: 12 }}>{bidder.failed}</td><td style={{ padding: 12 }}>{bidder.not_verified}</td><td style={{ padding: 12 }}>{bidder.review_status}</td><td style={{ padding: 12 }}><button type="button" onClick={() => onOpen?.(bidder)}>View evaluation</button></td></tr>)}</tbody></table>{!bidders.length && <p style={{ padding: 20 }}>No bidders are associated with this tender.</p>}</div>;
+}
