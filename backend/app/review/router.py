@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
+from app.authz.dependencies import require_officer
 from app.review.schemas import (
     OfficerDecisionUpdate,
     OfficerReviewCreate,
@@ -32,7 +33,10 @@ review_router = APIRouter(
 )
 
 
-def _get_service(db: Session = Depends(get_db)) -> ReviewService:
+def _get_service(
+    db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
+) -> ReviewService:
     return ReviewService(db)
 
 

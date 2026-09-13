@@ -35,21 +35,21 @@ The intended layering is Router -> Service -> Repository/Database/Integration. T
 
 | Question | Finding | Evidence |
 |---|---|---|
-| Login | Does not exist as a real flow. `/login` renders a placeholder page. | `frontend/src/App.jsx`, `frontend/src/pages/PlaceholderPage.jsx` |
+| Login | M3A provides a minimal Supabase Auth email/password flow at `/login`. | `frontend/src/App.jsx`, `frontend/src/pages/LoginPage.jsx` |
 | Signup | Not present. | No signup page, service, or route found. |
-| Supabase Auth | Not used. Supabase configuration is for PostgreSQL/Storage and provider configuration. | `backend/app/config/settings.py`, `backend/app/services/document_service.py` |
-| FastAPI authentication | Not implemented. | `backend/app/api/deps.py` exposes only `get_db` and a placeholder request context. |
+| Supabase Auth | Used for password verification and session lifecycle; no service-role key is exposed to the browser. | `frontend/src/auth/supabaseClient.js`, `backend/app/auth/service.py` |
+| FastAPI authentication | M3A validates bearer credentials through Supabase Auth and M4 resolves roles and ownership through centralized dependencies. | `backend/app/auth/dependencies.py`, `backend/app/authz/dependencies.py`, `backend/app/api/router.py` |
 | JWT | No JWT library, token parser, or bearer dependency found. | `backend/requirements.txt`, backend auth search |
 | Session authentication | No application session or cookie authentication found. | Backend and frontend auth search |
-| Frontend current user | Hard-coded presentation only: the header displays `Auditor Officer`. | `frontend/src/components/layout/Header.jsx` |
-| Identity storage | No authenticated identity is stored. `localStorage` is used only for the theme preference. | `frontend/src/components/layout/Header.jsx` |
-| Protected backend APIs | None. Routes use database/background dependencies but no authentication or role dependency. | `backend/app/api/router.py`, `backend/app/dashboard/router.py`, `backend/app/review/router.py` |
+| Frontend current user | Supabase Auth state is exposed through `AuthProvider`; the header displays the authenticated email and logout control. | `frontend/src/auth/AuthContext.jsx`, `frontend/src/components/layout/Header.jsx` |
+| Identity storage | Supabase client manages persisted session state; application identity mapping is stored in nullable `users.auth_user_id`. | `frontend/src/auth/supabaseClient.js`, `supabase/migrations/20260913_add_auth_identity_mapping.sql` |
+| Protected backend APIs | M4 protects all sensitive bidder, tender, document, compliance, evidence, verification, requirement, review, audit, and dashboard boundaries. | `backend/app/api/router.py`, `backend/app/dashboard/router.py`, `backend/app/review/router.py` |
 | Application user table | Yes, local `users` table and SQLAlchemy `User` model exist. | `backend/app/models/user.py`, `supabase/migrations/20260911_create_core_domain_schema.sql` |
 | Role field | Yes, `users.role`, defaulting to legacy `admin`. Tests use `procurement_officer`. No controlled enum/check constraint exists. | `User.role`, migration, backend tests |
-| Auth migrations | None. The `users` table is an application table, not a Supabase Auth integration. | `supabase/migrations/` |
+| Auth migrations | M3A adds nullable unique `users.auth_user_id`; historical application user UUIDs remain unchanged. | `supabase/migrations/20260913_add_auth_identity_mapping.sql` |
 | Auth frontend components/tests | No real auth components or auth tests. Existing tests verify unauthenticated demo/API behavior. | `frontend/src`, `backend/tests` |
 
-**Conclusion:** authentication and authorization do not currently exist. The existing `users` table is an application identity-like table, but its relationship to a future Supabase Auth identity is unresolved and must be decided before implementation.
+**Conclusion:** Authentication and identity resolution are implemented in M3A/M3. Backend authorization and ownership enforcement are implemented in M4. Frontend role-based routing remains unimplemented and will be added in Milestone 05.
 
 ## Current Database Architecture
 
@@ -145,6 +145,52 @@ The local uncommitted rollback snapshot is `m2_reconciliation_snapshot.json`. Th
 
 Cross-table role/profile consistency is not enforced by a database trigger in M02. Profile creation and role checks must be validated by the application/profile service in a later milestone; M02 deliberately does not implement RBAC or authentication.
 
+## M3A — Authentication Foundation
+
+M3A establishes authentication only. Supabase Auth is the provider for password verification and session/token lifecycle. The application database remains the identity/profile layer and does not store passwords or password hashes.
+
+The additive `users.auth_user_id` column maps a Supabase Auth UUID to the existing application `users.id` without replacing historical primary keys. `uq_users_auth_user_id` is unique for non-null mappings. Existing M2 users and the three confirmed demo organizations remain unchanged.
+
+The frontend Supabase client uses `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`, persists sessions through the official client, restores the initial session, subscribes to auth state changes, and provides logout. `/login` is now a minimal email/password login page; successful login navigates to the existing `/dashboard` page. No signup flow, role selection, route guard, or role-based navigation exists yet.
+
+The backend validates the bearer credential through Supabase Auth's `/auth/v1/user` endpoint, resolves the returned Auth UUID through `users.auth_user_id`, and exposes `/api/v1/auth/me` for identity retrieval. An Auth identity must already be explicitly mapped to an active application user; the endpoint does not provision users or authorize roles. `role` in the response is informational only.
+
+AUTHENTICATION IS IMPLEMENTED.
+
+RBAC AUTHORIZATION IS NOT IMPLEMENTED.
+
+M3 implements role-based signup and role/profile creation. M4 implements backend role enforcement and protected endpoints.
+
+## M3 — Role-Based Signup
+
+M3 reuses the M3A Supabase Auth foundation. The frontend requires an explicit account type and calls Supabase Auth signup first. When Supabase returns an authenticated session, the frontend sends the role/profile payload with the bearer token to `/api/v1/auth/provision`.
+
+The backend accepts only the canonical `BIDDER` and `OFFICER` roles using strict request validation. It obtains the Auth UUID and email from the validated Supabase token, never from request JSON. It rejects duplicate Auth mappings and duplicate application emails, then creates the application User and exactly one matching profile inside one database transaction.
+
+For `BIDDER`, the existing `Bidder` model is reused with required `legal_name` and optional `registration_number`, `gst_number`, and `pan_number`. For `OFFICER`, the existing `OfficerProfile` is reused; its current schema contains only `user_id` and timestamps, so no invented department or designation fields were added. The opposite profile is not created.
+
+The signup form has no default role. Switching to OFFICER clears bidder-only fields. Signup failure after Auth creation signs the client out; because Supabase Auth and PostgreSQL cannot share one transaction through the public client, an Auth account may require provider-side cleanup if provisioning fails. The application database transaction itself rolls back completely.
+
+Authentication is implemented. Role-based signup is implemented. M4 implements backend role enforcement and protected ownership boundaries; frontend selection and the informational role returned by `/api/v1/auth/me` are not security boundaries.
+
+## M4 — Backend Role Enforcement
+
+M4 keeps `get_authenticated_identity` as the only authentication-to-application-User resolution path. Centralized `require_role(ApplicationRole.BIDDER)` and `require_role(ApplicationRole.OFFICER)` dependencies compare only the trusted application `User.role`; they do not inspect request bodies, query parameters, URLs, custom headers, or frontend state. Legacy `admin` and `procurement_officer` values are not promoted to canonical roles.
+
+The bidder ownership dependency resolves the requested bidder through `Bidder.user_id == authenticated_user.id`. The document access dependency resolves the document's bidder relationship and permits the owning BIDDER or an OFFICER. A bidder changing `user_id`, `bidder_id`, `document_id`, `role`, `X-Role`, or query parameters cannot change the authenticated identity or cross the ownership boundary.
+
+M4 protects the following existing API boundaries:
+
+- Officer-only tender-bidder inspection and dashboard endpoints.
+- Bidder-owned bidder detail and bidder document upload/list endpoints.
+- Owning-bidder or officer document metadata, signed access, OCR, AI, retry, and government-verification endpoints.
+
+All sensitive legacy list, contract, compliance, review, verification, requirement, evidence, and audit surfaces now require authentication and appropriate role/ownership dependencies. Health and authentication operations are the only intentionally public/authentication-scoped exceptions.
+
+BACKEND RBAC IS IMPLEMENTED.
+
+FRONTEND ROLE-BASED ROUTING IS NOT YET IMPLEMENTED.
+
 ## Role Model
 
 The target first-version application roles are exactly:
@@ -226,62 +272,62 @@ The frontend guard is only a navigation and user-experience feature. The backend
 
 ## API Inventory and Future Role Intent
 
-Current protection status for the routes below is **none** unless noted otherwise. The listed future roles are design intent only.
+Current protection status for the routes below reflects M4 backend enforcement. Frontend route protection remains future work.
 
 | Method and route | Current implementation | Future role | Ownership/authorization requirement | Risk |
 |---|---|---|---|---|
-| GET `/api/v1/tenders` | `TenderService.list_tenders` | Shared/BIDDER/OFFICER | Public availability rules for bidders; officer scope for managed tenders | Entire catalog is currently exposed |
-| GET `/api/v1/tenders/{id}` | `TenderService.get_tender` | Shared/BIDDER/OFFICER | Tender visibility and officer authorization | No caller check |
-| GET `/api/v1/tenders/{id}/bidders` | Tender service relationship lookup | OFFICER | Authorized tender only | Exposes all linked bidders |
-| POST `/api/v1/tenders/{tender_id}/documents` | Document upload plus OCR/AI background task | OFFICER | Authorized tender; document must belong to tender | Processing trigger is unprotected |
-| POST `/api/v1/tenders/{tender_id}/documents/{document_id}/process` | Existing OCR/AI worker trigger | OFFICER | Verify document belongs to tender | Direct `db.get` relationship check only |
-| GET `/api/v1/tenders/{tender_id}/documents/{document_id}/processing` | Processing status | OFFICER | Authorized tender and document relationship | Status exposure is broad |
-| GET `/api/v1/tenders/{tender_id}/documents` | Tender document listing | OFFICER | Authorized tender | No caller check |
-| GET `/api/v1/bidders` | `BidderService.list_bidders` | OFFICER | Officer scope; no bidder-wide listing for BIDDER | Exposes private registry |
-| GET `/api/v1/bidders/{id}` | `BidderService.get_bidder` | BIDDER own / OFFICER | User-to-bidder ownership or officer tender scope | Any ID is queryable |
-| POST `/api/v1/bidders/{bidder_id}/documents` | Upload plus OCR/AI background task | BIDDER own / OFFICER support | Authenticated owner or authorized officer; bidder relationship | Caller chooses bidder ID |
-| GET `/api/v1/bidders/{bidder_id}/documents` | Bidder document listing | BIDDER own / OFFICER | Ownership/scope check | Any bidder's documents are listable |
-| GET `/api/v1/documents` | Global/filterable document listing | OFFICER; bidder limited to own future endpoint | Never honor arbitrary bidder/tender filters without scope | Broadest document exposure |
-| GET `/api/v1/documents/{id}` | Metadata lookup | BIDDER own / OFFICER | Document ownership/scope | Any ID is queryable |
-| GET `/api/v1/documents/{id}/access` | Signed Storage URL plus audit event | BIDDER own / OFFICER | Ownership/scope before signed URL | Data leak risk is high |
-| GET/POST `/api/v1/documents/{id}/ocr`, `/ocr/retry` | OCR status/retry | BIDDER own read; OFFICER process | Document ownership/scope; retry actor | Retry route triggers worker without auth |
-| GET/POST `/api/v1/documents/{id}/ai`, `/ai/retry` | AI status/retry | BIDDER own read; OFFICER process | Document ownership/scope | Retry route unprotected |
-| POST/GET `/api/v1/documents/{id}/verify`, `/verification` | Government verification | OFFICER or controlled BIDDER own action | Document/bidder ownership; preserve immutable history | Government result access is broad |
-| GET `/api/v1/verification/start`, `/verification/{id}` | Legacy contract verification | Future role-specific replacement | Verify bidder/document ownership | Demo/legacy path has no auth |
-| GET `/api/v1/tenders/{tender_id}/requirements` | Requirement listing | BIDDER read permitted requirements; OFFICER full | Tender visibility/scope | No visibility filtering |
-| POST `/api/v1/tenders/{tender_id}/requirements` | Requirement creation | OFFICER | Authorized tender and actor | Any caller can create |
-| POST `/api/v1/tenders/{tender_id}/requirements/extract` | AI requirement extraction | OFFICER | Authorized tender | AI suggestion trigger unprotected |
-| GET/PATCH `/api/v1/tender-requirements/{id}` | Requirement lookup/update | OFFICER; bidder read-only permitted view | Resolve requirement -> tender -> authorization | Update route unprotected |
-| POST `/api/v1/tender-requirements/{id}/approve` | Explicit approval and audit | OFFICER | Authorized tender; authenticated actor; no caller-provided officer ID | Critical decision endpoint unprotected |
-| POST `/api/v1/tender-requirements/{id}/reject` | Requirement rejection | OFFICER | Authorized tender; authenticated actor | Critical decision endpoint unprotected |
-| GET/POST `/api/v1/bidders/{id}/compliance` and `/evaluate` | Compliance read/evaluation | BIDDER own read; OFFICER execute/read | Tender + bidder ownership/scope | Any bidder can be evaluated/read |
-| POST/GET `/api/v1/tenders/{tender_id}/bidders/{bidder_id}/compliance/evaluate` and history | Evaluation orchestration/history | OFFICER execute; BIDDER own history read | Tender-bidder association and role | Evaluation history is exposed |
-| GET `/api/v1/compliance/evaluations/{id}` | Full evaluation and evidence | BIDDER own / OFFICER | Evaluation -> tender/bidder scope | Private evidence exposure |
-| GET `/api/v1/compliance/evaluations/{id}/evidence` and `/audit` | Trace/audit for evaluation | BIDDER own permitted trace; OFFICER | Evaluation scope and audit policy | Arbitrary evaluation IDs accepted |
-| GET `/api/v1/requirements/{id}/evidence`, `/tender-requirements/{id}/evidence`, `/evidence/{id}` | Evidence trace/item access | BIDDER own permitted; OFFICER | Resolve evidence to bidder/tender | Evidence can be fetched by ID |
-| GET `/api/v1/audit/events` and `/audit/{id}` | Audit listing/placeholder | OFFICER only, scoped | Role plus tender/entity scope; immutable read | Arbitrary filters and placeholder route |
-| GET `/api/v1/tenders/{id}/dashboard` and `/dashboard/requirements` | Task 17 aggregation | OFFICER | Authorized tender | Exposes bidder/evaluation/review summary |
-| GET `/api/v1/dashboard/summary` | Legacy placeholder | OFFICER or role-specific summary | Scope must be explicit | Currently returns global placeholder |
+| GET `/api/v1/tenders` | `TenderService.list_tenders` | Shared/BIDDER/OFFICER | Public availability rules for bidders; officer scope for managed tenders | M4 protected (authenticated user required) |
+| GET `/api/v1/tenders/{id}` | `TenderService.get_tender` | Authenticated users | Authentication dependency; no frontend route guard | M4 protected |
+| GET `/api/v1/tenders/{id}/bidders` | Tender service relationship lookup | OFFICER | Authorized tender only | M4 protected (OFFICER only) |
+| POST `/api/v1/tenders/{tender_id}/documents` | Document upload plus OCR/AI background task | OFFICER | Authenticated officer; tender relationship retained by service | M4 protected |
+| POST `/api/v1/tenders/{tender_id}/documents/{document_id}/process` | Existing OCR/AI worker trigger | OFFICER | Authenticated officer; tender/document relationship retained | M4 protected |
+| GET `/api/v1/tenders/{tender_id}/documents/{document_id}/processing` | Processing status | OFFICER | Authenticated officer; tender/document relationship retained | M4 protected |
+| GET `/api/v1/tenders/{tender_id}/documents` | Tender document listing | OFFICER | Authenticated officer | M4 protected |
+| GET `/api/v1/bidders` | `BidderService.list_bidders` | OFFICER | Officer scope; no bidder-wide listing for BIDDER | M4 protected (OFFICER only) |
+| GET `/api/v1/bidders/{id}` | `BidderService.get_bidder` | BIDDER own / OFFICER | User-to-bidder ownership or officer tender scope | M4 protected (owning BIDDER only) |
+| POST `/api/v1/bidders/{bidder_id}/documents` | Upload plus OCR/AI background task | BIDDER own / OFFICER support | Authenticated owner or authorized officer; bidder relationship | M4 protected (owning BIDDER only) |
+| GET `/api/v1/bidders/{bidder_id}/documents` | Bidder document listing | BIDDER own / OFFICER | Ownership/scope check | M4 protected (owning BIDDER only) |
+| GET `/api/v1/documents` | Global/filterable document listing | OFFICER | Authenticated officer; filters remain service inputs | M4 protected |
+| GET `/api/v1/documents/{id}` | Metadata lookup | BIDDER own / OFFICER | Central document ownership dependency | M4 protected |
+| GET `/api/v1/documents/{id}/access` | Signed Storage URL plus audit event | BIDDER own / OFFICER | Ownership/scope before signed URL | M4 protected (owner or OFFICER) |
+| GET/POST `/api/v1/documents/{id}/ocr`, `/ocr/retry` | OCR status/retry | BIDDER own / OFFICER | Central document ownership dependency | M4 protected |
+| GET/POST `/api/v1/documents/{id}/ai`, `/ai/retry` | AI status/retry | BIDDER own / OFFICER | Central document ownership dependency | M4 protected |
+| POST/GET `/api/v1/documents/{id}/verify`, `/verification` | Government verification | BIDDER own / OFFICER | Central document ownership dependency | M4 protected |
+| POST/GET `/api/v1/verification/start`, `/verification/{id}` | Legacy contract verification | OFFICER | Authenticated officer; legacy IDs no longer public | M4 protected |
+| GET `/api/v1/tenders/{tender_id}/requirements` | Requirement listing | OFFICER | Authenticated officer | M4 protected |
+| POST `/api/v1/tenders/{tender_id}/requirements` | Requirement creation | OFFICER | Authenticated officer | M4 protected |
+| POST `/api/v1/tenders/{tender_id}/requirements/extract` | AI requirement extraction | OFFICER | Authenticated officer | M4 protected |
+| GET/PATCH `/api/v1/tender-requirements/{id}` | Requirement lookup/update | OFFICER | Authenticated officer | M4 protected |
+| POST `/api/v1/tender-requirements/{id}/approve` | Explicit approval and audit | OFFICER | Authenticated officer identity replaces body officer ID | M4 protected |
+| POST `/api/v1/tender-requirements/{id}/reject` | Requirement rejection | OFFICER | Authenticated officer | M4 protected |
+| GET/POST `/api/v1/bidders/{id}/compliance` and `/evaluate` | Compliance read/evaluation | BIDDER own read; OFFICER execute | Tender-bidder ownership dependency | M4 protected |
+| POST/GET `/api/v1/tenders/{tender_id}/bidders/{bidder_id}/compliance/evaluate` and history | Evaluation orchestration/history | OFFICER execute; BIDDER own history read | Tender-bidder association and role | M4 protected (OFFICER execute / owning BIDDER history) |
+| GET `/api/v1/compliance/evaluations/{id}` | Full evaluation and evidence | BIDDER own / OFFICER | Central evaluation ownership dependency | M4 protected |
+| GET `/api/v1/compliance/evaluations/{id}/evidence` and `/audit` | Trace/audit for evaluation | BIDDER own evidence; OFFICER audit | Evaluation ownership or officer role | M4 protected |
+| GET `/api/v1/requirements/{id}/evidence`, `/tender-requirements/{id}/evidence`, `/evidence/{id}` | Evidence trace/item access | OFFICER | Authenticated officer | M4 protected |
+| GET `/api/v1/audit/events` and `/audit/{id}` | Audit listing/placeholder | OFFICER only | Central officer dependency | M4 protected |
+| GET `/api/v1/tenders/{id}/dashboard` and `/dashboard/requirements` | Task 17 aggregation | OFFICER | Authorized tender | M4 protected (OFFICER only) |
+| GET `/api/v1/dashboard/summary` | Legacy placeholder | OFFICER | Central officer dependency | M4 protected |
 | GET `/api/v1/health`, `/health/database` | Health | Public/operations policy | No business data | Database health may reveal availability |
 
 ## Frontend Route Inventory
 
-All current application routes are mounted inside `MainLayout`; no route guard exists. `/login` is a placeholder. Classification describes current/future intent, not implemented protection.
+All current application routes are mounted inside `MainLayout`; no route guard exists. `/login` and `/signup` use the M3A/M3 authentication flows. Frontend classification is not a security boundary.
 
 | Route | Current classification | Future classification |
 |---|---|---|
 | `/` | PUBLIC redirect to `/dashboard` | PUBLIC landing page |
 | `/login` | PUBLIC placeholder | PUBLIC |
-| `/dashboard` | CURRENTLY UNPROTECTED demo officer dashboard | FUTURE OFFICER |
-| `/tenders` | CURRENTLY UNPROTECTED | SHARED list with role-specific actions |
-| `/tenders/:id` | CURRENTLY UNPROTECTED; includes requirement actions | FUTURE OFFICER, with bidder read view split |
-| `/tenders/:id/dashboard` | CURRENTLY UNPROTECTED | FUTURE OFFICER |
-| `/tenders/:id/workflow` | CURRENTLY UNPROTECTED | FUTURE OFFICER |
-| `/bidders` | CURRENTLY UNPROTECTED | FUTURE OFFICER |
-| `/bidders/:id` | CURRENTLY UNPROTECTED; includes compliance and officer review controls | FUTURE OFFICER; bidder own profile uses a separate route |
-| `/documents` | CURRENTLY UNPROTECTED; global bidder selector/upload | Role-specific bidder documents and officer document views |
-| `/verification` | CURRENTLY UNPROTECTED demo workflow | FUTURE OFFICER or controlled bidder own workflow |
-| `/audit` | CURRENTLY UNPROTECTED | FUTURE OFFICER |
+| `/dashboard` | Frontend route has no guard; backend APIs enforce role | Future frontend UX protection |
+| `/tenders` | Frontend route has no guard; backend APIs enforce authentication/role | Future frontend UX protection |
+| `/tenders/:id` | Frontend route has no guard; sensitive backend APIs are protected | Future frontend UX protection |
+| `/tenders/:id/dashboard` | Frontend route has no guard; backend dashboard API is OFFICER-only | Future frontend UX protection |
+| `/tenders/:id/workflow` | Frontend route has no guard; backend workflow APIs enforce their boundaries | Future frontend UX protection |
+| `/bidders` | Frontend route has no guard; bidder registry API is OFFICER-only | Future frontend UX protection |
+| `/bidders/:id` | Frontend route has no guard; bidder API enforces ownership | Future frontend UX protection |
+| `/documents` | Frontend route has no guard; global document API is OFFICER-only | Future frontend UX protection |
+| `/verification` | Frontend route has no guard; backend verification APIs enforce role/ownership | Future frontend UX protection |
+| `/audit` | Frontend route has no guard; backend audit APIs are OFFICER-only | Future frontend UX protection |
 | `/settings` | CURRENTLY UNPROTECTED/demo | Shared account settings, with role-specific sections |
 
 The future route shape should preserve current deep links where practical while adding `/bidder/*` and `/officer/*` layouts. Recommended structure:

@@ -455,7 +455,9 @@ def test_14_api_approve_endpoint_succeeds(sqlite_session):
         data = res.json()
         assert data["status"] == "APPROVED"
         assert data["approved_at"] is not None
-        assert data["approved_by"] == user_id
+        # M4 derives the approving actor from the authenticated application user;
+        # the request body officer_id is not trusted.
+        assert data["approved_by"] == "c1111111-1111-1111-1111-111111111111"
     finally:
         app.dependency_overrides.clear()
 

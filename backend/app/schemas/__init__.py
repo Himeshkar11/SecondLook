@@ -1,4 +1,5 @@
 from .user import UserCreate, UserRead
+from .auth import AuthenticatedApplicationUserRead, SignupProvisionRequest, SignupProvisionResponse
 from .tender import TenderCreate, TenderRead
 from .bidder import BidderCreate, BidderRead
 from .document import DocumentCreate, DocumentRead
@@ -25,6 +26,9 @@ from .compliance import (
 __all__ = [
     "UserCreate",
     "UserRead",
+    "AuthenticatedApplicationUserRead",
+    "SignupProvisionRequest",
+    "SignupProvisionResponse",
     "TenderCreate",
     "TenderRead",
     "BidderCreate",

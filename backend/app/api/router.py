@@ -15,6 +15,18 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import get_authenticated_identity, get_supabase_auth_user
+from app.auth.service import SupabaseAuthUser
+from app.authz.dependencies import (
+    require_document_access,
+    require_authenticated_user,
+    require_bidder_or_officer_bidder,
+    require_evaluation_access,
+    require_officer,
+    require_owned_bidder,
+    require_owned_bidder_by_id,
+    require_tender_bidder_access,
+)
 from app.api.deps import get_api_request_context, get_db
 from app.services.bidder_service import BidderService
 from app.services.document_service import DocumentService
@@ -43,8 +55,15 @@ from app.services.audit_service import AuditService, get_audit_service
 from app.services.compliance_service import ComplianceService, NoApprovedRequirementsError
 from app.services.tender_service import TenderService
 from app.services.verification_service import VerificationService
+from app.models.bidder import Bidder
 from app.models.document import Document
 from app.models.tender_requirement import TenderRequirement
+from app.schemas.auth import (
+    AuthenticatedApplicationUserRead,
+    SignupProvisionRequest,
+    SignupProvisionResponse,
+)
+from app.services.signup_service import SignupProvisioningService
 from app.workers.jobs import DocumentOCRStatus
 from app.workers.worker import DocumentAIWorker, DocumentOCRWorker, DocumentVerificationWorker
 
@@ -52,6 +71,49 @@ from app.workers.worker import DocumentAIWorker, DocumentOCRWorker, DocumentVeri
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1")
+
+
+@router.get("/auth/me", response_model=AuthenticatedApplicationUserRead, tags=["Authentication"], summary="Get authenticated application identity")
+def get_authenticated_application_user(identity=Depends(get_authenticated_identity)):
+    """Resolve the bearer token to its linked application user.
+
+    This endpoint establishes identity only; it does not authorize any role or
+    protect the existing domain routes.
+    """
+    user = identity.application_user
+    return AuthenticatedApplicationUserRead(
+        user_id=user.id,
+        auth_user_id=identity.auth_user_id,
+        email=user.email,
+        full_name=user.full_name,
+        role=user.role,
+        is_active=user.is_active,
+    )
+
+
+@router.post(
+    "/auth/provision",
+    response_model=SignupProvisionResponse,
+    status_code=201,
+    tags=["Authentication"],
+    summary="Create the application profile for a Supabase Auth account",
+)
+def provision_application_user(
+    payload: SignupProvisionRequest,
+    auth_user: SupabaseAuthUser = Depends(get_supabase_auth_user),
+    db: Session = Depends(get_db),
+):
+    """Create exactly one role-specific application profile after Auth signup.
+
+    This endpoint creates identity/profile records only. It does not grant
+    access to existing business APIs or enforce role authorization.
+    """
+    if db is None:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Application identity service is unavailable."},
+        )
+    return SignupProvisioningService().provision(db, auth_user, payload)
 
 
 @router.get("/health/database", tags=["Health"], summary="Database health check", responses={
@@ -82,7 +144,12 @@ def health_database(db: Session = Depends(get_db)):
     200: {"description": "Paginated tender list response."},
     500: {"description": "Database query error."}
 })
-def list_tenders(page: int = 1, page_size: int = 20, db: Session = Depends(get_db)):
+def list_tenders(
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db),
+    _user=Depends(require_authenticated_user),
+):
     """Route wrapper for TenderService.list_tenders."""
     service = TenderService(db=db)
     try:
@@ -99,7 +166,11 @@ def list_tenders(page: int = 1, page_size: int = 20, db: Session = Depends(get_d
     404: {"description": "Tender not found."},
     500: {"description": "Database query error."}
 })
-def get_tender_bidders(id: str, db: Session = Depends(get_db)):
+def get_tender_bidders(
+    id: str,
+    db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
+):
     """Route wrapper for TenderService.get_tender_bidders."""
     service = TenderService(db=db)
     try:
@@ -129,6 +200,7 @@ def run_compliance_evaluation_endpoint(
     bidder_id: str,
     payload: dict = Body(default_factory=dict),
     db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
 ):
     """Execute complete deterministic statutory compliance evaluation for a bidder.
 
@@ -174,6 +246,7 @@ def list_compliance_evaluations_history_endpoint(
     tender_id: str,
     bidder_id: str,
     db: Session = Depends(get_db),
+    _bidder=Depends(require_tender_bidder_access),
 ):
     """Fetch immutable audit history of all compliance evaluations executed for this bidder and tender."""
     service = ComplianceService(db=db)
@@ -196,6 +269,7 @@ def list_compliance_evaluations_history_endpoint(
 def get_compliance_evaluation_endpoint(
     evaluation_id: str,
     db: Session = Depends(get_db),
+    _evaluation=Depends(require_evaluation_access),
 ):
     """Retrieve full details, summary, and traceable evidence for a specific compliance evaluation run."""
     service = ComplianceService(db=db)
@@ -226,6 +300,7 @@ def get_compliance_evaluation_endpoint(
 def get_compliance_evaluation_evidence_endpoint(
     evaluation_id: str,
     db: Session = Depends(get_db),
+    _evaluation=Depends(require_evaluation_access),
 ):
     """Retrieve complete evidence trace chains connecting requirements to original secure files."""
     service = ComplianceService(db=db)
@@ -253,6 +328,7 @@ def get_compliance_evaluation_evidence_endpoint(
 def get_compliance_evaluation_audit_endpoint(
     evaluation_id: str,
     db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
 ):
     """Retrieve audit events associated with a compliance evaluation run."""
     service = AuditService(db=db)
@@ -283,6 +359,7 @@ def get_requirement_evidence_endpoint(
     requirement_id: str,
     bidder_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
 ):
     """Retrieve evidence trace chain for an individual tender requirement."""
     service = ComplianceService(db=db)
@@ -313,6 +390,7 @@ def get_requirement_evidence_endpoint(
 def get_evidence_item_endpoint(
     evidence_id: str,
     db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
 ):
     """Retrieve details and trace for a specific evidence item."""
     try:
@@ -380,6 +458,7 @@ def list_audit_events_endpoint(
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
 ):
     """Query immutable audit events for security, verification, and compliance monitoring."""
     service = AuditService(db=db)
@@ -406,31 +485,17 @@ def list_audit_events_endpoint(
         ) from exc
 
 
-@router.get("/tenders/{id:path}", tags=["Tenders"], summary="Get one tender", responses={
-    200: {"description": "Tender response."},
-    404: {"description": "Tender not found."},
-    500: {"description": "Database query error."}
-})
-def get_tender(id: str, db: Session = Depends(get_db)):
-    """Route wrapper for TenderService.get_tender. Accepts UUID or reference number."""
-    service = TenderService(db=db)
-    try:
-        tender = service.get_tender(id)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to load tender details", "details": {}}},
-        ) from exc
-    if tender is None:
-        raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Tender not found", "details": {}}})
-    return tender
-
-
 @router.get("/bidders", tags=["Bidders"], summary="List bidders", responses={
     200: {"description": "Paginated bidder list response."},
     500: {"description": "Database query error."}
 })
-def list_bidders(page: int = 1, page_size: int = 20, tender_id: str | None = None, db: Session = Depends(get_db)):
+def list_bidders(
+    page: int = 1,
+    page_size: int = 20,
+    tender_id: str | None = None,
+    db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
+):
     """Route wrapper for BidderService.list_bidders."""
     service = BidderService(db=db)
     try:
@@ -442,12 +507,16 @@ def list_bidders(page: int = 1, page_size: int = 20, tender_id: str | None = Non
         ) from exc
 
 
-@router.get("/bidders/{id}", tags=["Bidders"], summary="Get one bidder", responses={
+@router.get("/bidders/{id}", tags=["Bidders"], summary="Get own bidder profile", responses={
     200: {"description": "Bidder response."},
     404: {"description": "Bidder not found."},
     500: {"description": "Database query error."}
 })
-def get_bidder(id: str, db: Session = Depends(get_db)):
+def get_bidder(
+    id: str,
+    db: Session = Depends(get_db),
+    _owned_bidder: Bidder = Depends(require_owned_bidder_by_id),
+):
     """Route wrapper for BidderService.get_bidder."""
     service = BidderService(db=db)
     try:
@@ -475,6 +544,7 @@ async def upload_bidder_document(
     file: UploadFile = File(...),
     document_type: str = Form(...),
     db: Session = Depends(get_db),
+    _owned_bidder: Bidder = Depends(require_owned_bidder),
 ):
     """Upload a document for a specific bidder and trigger asynchronous OCR."""
     service = DocumentService(db=db)
@@ -513,7 +583,13 @@ async def upload_bidder_document(
     200: {"description": "List of bidder documents."},
     500: {"description": "Database query error."}
 })
-def list_bidder_documents(bidder_id: str, page: int = 1, page_size: int = 50, db: Session = Depends(get_db)):
+def list_bidder_documents(
+    bidder_id: str,
+    page: int = 1,
+    page_size: int = 50,
+    db: Session = Depends(get_db),
+    _owned_bidder: Bidder = Depends(require_owned_bidder),
+):
     """List all documents belonging to a bidder."""
     service = DocumentService(db=db)
     try:
@@ -533,6 +609,7 @@ async def upload_tender_document(
     file: UploadFile = File(...),
     document_type: str = Form("TENDER_DOCUMENT"),
     db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
 ):
     """Upload a document for a tender and trigger OCR in the background."""
     service = DocumentService(db=db)
@@ -582,6 +659,7 @@ def process_tender_document(
     document_id: str,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
 ):
     try:
         document_uuid = UUID(document_id)
@@ -607,7 +685,12 @@ def process_tender_document(
     tags=["Tenders", "Documents"],
     summary="Get tender document OCR and AI processing status",
 )
-def get_tender_document_processing(tender_id: str, document_id: str, db: Session = Depends(get_db)):
+def get_tender_document_processing(
+    tender_id: str,
+    document_id: str,
+    db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
+):
     try:
         document_uuid = UUID(document_id)
     except (ValueError, TypeError):
@@ -635,6 +718,7 @@ def list_tender_documents(
     page: int = 1,
     page_size: int = 50,
     db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
 ):
     """List all documents associated with a tender."""
     service = DocumentService(db=db)
@@ -654,6 +738,7 @@ def list_all_documents(
     page: int = 1,
     page_size: int = 50,
     db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
 ):
     """List documents across all entities or filter by bidder_id / tender_id."""
     service = DocumentService(db=db)
@@ -668,7 +753,12 @@ def list_all_documents(
     404: {"description": "Document not found."},
     500: {"description": "Storage access error."}
 })
-def get_document_access(document_id: str, expires_in: int = 3600, db: Session = Depends(get_db)):
+def get_document_access(
+    document_id: str,
+    expires_in: int = 3600,
+    db: Session = Depends(get_db),
+    _document: Document = Depends(require_document_access),
+):
     """Generate a short-lived signed access URL for a private stored document."""
     service = DocumentService(db=db)
     try:
@@ -697,7 +787,11 @@ def get_document_access(document_id: str, expires_in: int = 3600, db: Session = 
     404: {"description": "Document not found."},
     500: {"description": "Database query error."}
 })
-def get_document_ocr(document_id: str, db: Session = Depends(get_db)):
+def get_document_ocr(
+    document_id: str,
+    db: Session = Depends(get_db),
+    _document: Document = Depends(require_document_access),
+):
     """Retrieve OCR status and extracted raw text for a document."""
     service = DocumentService(db=db)
     try:
@@ -714,7 +808,12 @@ def get_document_ocr(document_id: str, db: Session = Depends(get_db)):
     404: {"description": "Document not found."},
     500: {"description": "Database or worker error."}
 })
-def retry_document_ocr(document_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def retry_document_ocr(
+    document_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _document: Document = Depends(require_document_access),
+):
     """Re-queue an OCR job for a failed or stuck document."""
     service = DocumentService(db=db)
     try:
@@ -739,7 +838,11 @@ def retry_document_ocr(document_id: str, background_tasks: BackgroundTasks, db: 
     404: {"description": "Document not found."},
     500: {"description": "Database query error."}
 })
-def get_document_ai(document_id: str, db: Session = Depends(get_db)):
+def get_document_ai(
+    document_id: str,
+    db: Session = Depends(get_db),
+    _document: Document = Depends(require_document_access),
+):
     """Retrieve AI extraction status and structured JSON for a document."""
     service = DocumentService(db=db)
     try:
@@ -756,7 +859,12 @@ def get_document_ai(document_id: str, db: Session = Depends(get_db)):
     404: {"description": "Document not found."},
     500: {"description": "Database or worker error."}
 })
-def retry_document_ai(document_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def retry_document_ai(
+    document_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _document: Document = Depends(require_document_access),
+):
     """Re-queue an AI extraction job for a failed or stuck document."""
     service = DocumentService(db=db)
     try:
@@ -783,7 +891,11 @@ def retry_document_ai(document_id: str, background_tasks: BackgroundTasks, db: S
     422: {"description": "Validation or format error."},
     500: {"description": "Internal server error."}
 })
-def verify_document(document_id: str, db: Session = Depends(get_db)):
+def verify_document(
+    document_id: str,
+    db: Session = Depends(get_db),
+    _document: Document = Depends(require_document_access),
+):
     """Trigger statutory government verification for a document with completed AI extraction."""
     service = GovernmentVerificationService(db=db)
     try:
@@ -805,7 +917,11 @@ def verify_document(document_id: str, db: Session = Depends(get_db)):
     404: {"description": "Document not found."},
     500: {"description": "Database query error."}
 })
-def get_document_verification(document_id: str, db: Session = Depends(get_db)):
+def get_document_verification(
+    document_id: str,
+    db: Session = Depends(get_db),
+    _document: Document = Depends(require_document_access),
+):
     """Retrieve statutory verification status, field comparisons, and history for a document."""
     service = GovernmentVerificationService(db=db)
     try:
@@ -823,7 +939,11 @@ def get_document_verification(document_id: str, db: Session = Depends(get_db)):
     404: {"description": "Document not found."},
     500: {"description": "Database query error."}
 })
-def get_document(document_id: str, db: Session = Depends(get_db)):
+def get_document(
+    document_id: str,
+    db: Session = Depends(get_db),
+    _document: Document = Depends(require_document_access),
+):
     """Retrieve metadata for a specific document."""
     service = DocumentService(db=db)
     try:
@@ -846,6 +966,7 @@ def upload_document(
     bidder_id: str = Form(...),
     document_type: str = Form(...),
     context: dict = Depends(get_api_request_context),
+    _officer=Depends(require_officer),
 ):
     """Route wrapper for DocumentService.upload_document (legacy contract endpoint)."""
     service = DocumentService()
@@ -865,7 +986,10 @@ def upload_document(
     400: {"description": "Bad request."},
     422: {"description": "Unprocessable entity."}
 })
-def start_verification(payload: dict = Body(...)):
+def start_verification(
+    payload: dict = Body(...),
+    _officer=Depends(require_officer),
+):
     """Route wrapper for VerificationService.start_verification."""
     service = VerificationService()
     try:
@@ -886,7 +1010,10 @@ def start_verification(payload: dict = Body(...)):
     200: {"description": "Verification job/status response."},
     404: {"description": "Verification record not found."}
 })
-def get_verification(id: UUID):
+def get_verification(
+    id: UUID,
+    _officer=Depends(require_officer),
+):
     """Route wrapper for VerificationService.get_verification."""
     service = VerificationService()
     verification = service.get_verification(str(id))
@@ -898,7 +1025,9 @@ def get_verification(id: UUID):
 @router.get("/dashboard/summary", tags=["Dashboard"], summary="Dashboard summary", responses={
     200: {"description": "High-level dashboard placeholder response."}
 })
-def get_dashboard_summary():
+def get_dashboard_summary(
+    _officer=Depends(require_officer),
+):
     """Contract placeholder for GET /api/v1/dashboard/summary.
 
     No live statistics are computed in M10.
@@ -915,7 +1044,10 @@ def get_dashboard_summary():
     200: {"description": "Audit placeholder response."},
     404: {"description": "Audit record not found placeholder."}
 })
-def get_audit(id: UUID):
+def get_audit(
+    id: UUID,
+    _officer=Depends(require_officer),
+):
     """Contract placeholder for GET /api/v1/audit/{id}."""
     return {
         "id": str(id),
@@ -971,6 +1103,7 @@ def get_tender_requirements(
     tender_id: str,
     status: Optional[str] = Query(None, description="Filter by requirement status"),
     db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
 ):
     """Fetch statutory requirements defined for a tender, optionally filtered by status."""
     service = ComplianceService(db=db)
@@ -995,6 +1128,7 @@ def create_tender_requirement(
     tender_id: str,
     payload: TenderRequirementCreate,
     db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
 ):
     """Add a new requirement to a tender. Initial status is UNDER_REVIEW or DRAFT."""
     service = ComplianceService(db=db)
@@ -1019,6 +1153,7 @@ def extract_tender_requirements(
     tender_id: str,
     payload: TenderExtractionRequest = Body(...),
     db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
 ):
     """Extract candidate requirements from tender document or text.
     
@@ -1064,6 +1199,7 @@ def extract_tender_requirements(
 def get_single_tender_requirement(
     requirement_id: str,
     db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
 ):
     """Retrieve a single requirement by ID."""
     service = ComplianceService(db=db)
@@ -1086,6 +1222,7 @@ def update_tender_requirement(
     requirement_id: str,
     payload: TenderRequirementUpdate = Body(...),
     db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
 ):
     """Update requirement parameters.
     
@@ -1124,9 +1261,10 @@ def approve_tender_requirement(
     requirement_id: str,
     payload: dict = Body(default_factory=dict),
     db: Session = Depends(get_db),
+    officer=Depends(require_officer),
 ):
     """Explicitly approve a requirement by a procurement officer."""
-    officer_id = payload.get("officer_id") if isinstance(payload, dict) else None
+    officer_id = str(officer.id)
     service = ComplianceService(db=db)
     try:
         r = service.approve_requirement(requirement_id, officer_id=officer_id)
@@ -1159,6 +1297,7 @@ def reject_tender_requirement(
     requirement_id: str,
     payload: dict = Body(default_factory=dict),
     db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
 ):
     """Reject a requirement candidate."""
     reason = payload.get("reason") if isinstance(payload, dict) else None
@@ -1189,6 +1328,7 @@ def get_bidder_compliance(
     bidder_id: str,
     tender_id: str,
     db: Session = Depends(get_db),
+    _bidder=Depends(require_tender_bidder_access),
 ):
     """Retrieve or run factual compliance evaluations of tender requirements against verified evidence."""
     service = ComplianceService(db=db)
@@ -1212,6 +1352,7 @@ def evaluate_bidder_compliance(
     bidder_id: str,
     payload: dict = Body(...),
     db: Session = Depends(get_db),
+    _officer=Depends(require_officer),
 ):
     """Execute fresh deterministic compliance evaluation against verified evidence."""
     tender_id = payload.get("tender_id")
@@ -1229,3 +1370,27 @@ def evaluate_bidder_compliance(
             status_code=500,
             detail={"error": {"code": "EVALUATION_ERROR", "message": str(exc), "details": {}}},
         ) from exc
+
+
+@router.get("/tenders/{id:path}", tags=["Tenders"], summary="Get one tender", responses={
+    200: {"description": "Tender response."},
+    404: {"description": "Tender not found."},
+    500: {"description": "Database query error."}
+})
+def get_tender(
+    id: str,
+    db: Session = Depends(get_db),
+    _user=Depends(require_authenticated_user),
+):
+    """Route wrapper for TenderService.get_tender. Accepts UUID or reference number."""
+    service = TenderService(db=db)
+    try:
+        tender = service.get_tender(id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to load tender details", "details": {}}},
+        ) from exc
+    if tender is None:
+        raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Tender not found", "details": {}}})
+    return tender

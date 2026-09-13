@@ -1,7 +1,7 @@
 # SecondLook Milestone Status
 
-Current Milestone: 02  
-Status: COMPLETE
+Current Milestone: 04 — Authentication + Backend Role Enforcement
+Status: COMPLETED / READY FOR REVIEW
 
 ## What Was Inspected
 
@@ -14,14 +14,13 @@ Status: COMPLETE
 
 ## Architecture Findings
 
-- Authentication does not currently exist.
-- Supabase Auth is not used. Supabase is currently used for PostgreSQL and private Storage integration.
-- FastAPI routes have no authentication or role dependencies. The request context dependency explicitly reports `authenticated: false` as a contract placeholder.
-- A local `users` table/model exists with a free-form `role` field defaulting to legacy `admin`; tests use `procurement_officer`.
-- `bidders.user_id` links bidder records to `users.id`, but is not unique.
-- No officer profile table or bid submission table exists. `tender_bidders` is the current tender/bidder association.
-- Frontend routes are inside one unguarded layout. `/login` is a placeholder; the header uses a hard-coded officer display. `localStorage` is used only for theme preference.
-- Documents, evidence, evaluations, reviews, audit events, and processing endpoints are currently addressable by resource IDs without caller ownership checks.
+- Supabase Auth provides authentication for login and signup flows. Supabase is also used for PostgreSQL and private Storage integration.
+- FastAPI domain routes enforce centralized authentication and role/ownership authorization dependencies implemented in M4.
+- A local `users` table/model exists with constrained canonical `BIDDER` and `OFFICER` roles alongside temporary legacy compatibility values.
+- `bidders.user_id` links bidder records to `users.id` and is unique; `users.auth_user_id` is a nullable unique Supabase identity mapping.
+- `officer_profiles` is the existing one-to-one officer profile foundation. No bid submission table exists; `tender_bidders` is the current tender/bidder association.
+- Frontend routes remain inside one unguarded layout. `/login` and `/signup` use Supabase Auth; no route guards or role-based routing were added (deferred to M5).
+- Documents, evidence, evaluations, reviews, audit events, and processing endpoints are protected by centralized ownership and role dependencies.
 - Existing OCR, AI, government verification, evidence, compliance, review, audit, worker, Storage, and Task 17/19/20 systems are established protected systems.
 
 ## Files Created
@@ -29,14 +28,42 @@ Status: COMPLETE
 - `backend/app/models/officer_profile.py`
 - `backend/tests/test_user_role_foundation.py`
 - `supabase/migrations/20260913_add_user_role_profiles.sql`
+- `supabase/migrations/20260913_add_auth_identity_mapping.sql`
 - `docs/M2_BLOCKER_ANALYSIS.md`
 - `m2_reconciliation_snapshot.json`
+- `backend/app/auth/__init__.py`
+- `backend/app/auth/service.py`
+- `backend/app/auth/dependencies.py`
+- `backend/app/schemas/auth.py`
+- `backend/tests/test_authentication_foundation.py`
+- `frontend/src/auth/supabaseClient.js`
+- `frontend/src/auth/AuthContext.jsx`
+- `frontend/src/pages/LoginPage.jsx`
+- `backend/app/services/signup_service.py`
+- `backend/tests/test_signup_foundation.py`
+- `backend/app/authz/__init__.py`
+- `backend/app/authz/dependencies.py`
+- `backend/tests/test_authorization_boundaries.py`
+- `backend/tests/conftest.py`
+- `frontend/src/pages/SignupPage.jsx`
+- `frontend/src/pages/SignupPage.jsx`
 
 ## Files Modified
 
 - `backend/app/models/user.py`
 - `backend/app/models/bidder.py`
 - `backend/app/models/__init__.py`
+- `backend/app/models/user.py`
+- `backend/app/api/router.py`
+- `backend/app/dashboard/router.py`
+- `backend/app/schemas/__init__.py`
+- `frontend/src/main.jsx`
+- `frontend/src/App.jsx`
+- `frontend/src/components/layout/Header.jsx`
+- `frontend/package.json`
+- `frontend/package-lock.json`
+- `.env.example`
+- `docker-compose.yml`
 - `backend/tests/test_compliance_orchestration.py`
 - `backend/tests/test_evidence_traceability.py`
 - `backend/tests/test_tender_requirement_management.py`
@@ -83,14 +110,10 @@ Pre-existing task-file and M01 documentation changes were present before the M02
 
 ## Known Risks
 
-- Existing role data is not constrained and includes values outside the target role model.
-- Existing `bidders.user_id` cardinality is not one-to-one by database constraint.
-- No current mapping exists between Supabase Auth identities and local `users` rows.
-- Officer access scope is not modeled beyond tender creator references.
-- Broad unauthenticated routes currently expose bidder, document, evidence, evaluation, review, and audit data.
-- Some routes accept actor IDs in request bodies or optional parameters; these must eventually be derived from authenticated identity.
-- Legacy/demo endpoints coexist with database-backed endpoints and need a staged authorization/retirement plan.
-- No RLS policies were found in the inspected migrations.
+- Officer access scope is based on the canonical OFFICER role; fine-grained tender assignment beyond tender creation remains an open model decision.
+- Legacy/demo endpoints coexist with database-backed endpoints and need a staged retirement plan once full frontend workflows are complete.
+- No database RLS policies exist; authorization is enforced centrally at the backend API layer.
+- Frontend role-based routing is not yet implemented (scheduled for Milestone 05).
 
 ## Reconciliation Result
 
@@ -134,15 +157,68 @@ The completed investigation and reconciliation are recorded in [docs/M2_BLOCKER_
 - Duplicate bidder-user groups: 0. Legacy admin bidder profiles: 0.
 - No live verification, compliance, evidence, or direct audit-entity references existed for these bidders; all counts remain unchanged at zero.
 
+## M3A — Authentication Foundation
+
+M3A establishes Supabase Auth as the authentication provider without implementing role-based signup or authorization.
+
+- Frontend uses `@supabase/supabase-js` with `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`.
+- `AuthProvider` restores sessions, subscribes to Supabase auth state changes, exposes the current Auth user, and supports logout.
+- `/login` performs Supabase email/password sign-in and navigates to the existing `/dashboard` destination. No signup UI was added.
+- `users.auth_user_id` is a nullable additive mapping to the Supabase Auth UUID with a partial unique index.
+- Backend validates bearer credentials by calling Supabase Auth `/auth/v1/user`; it never creates or signs JWTs.
+- `/api/v1/auth/me` resolves the validated Auth UUID to an active application User. Identity lookup is not role authorization.
+- Unmapped Auth identities are rejected with a safe error rather than being assigned a role or privileged profile.
+- No passwords, password hashes, tokens, service-role credentials, route guards, dashboards, or protected business routes were added.
+
+Focused M3A tests: `6 passed`.
+Frontend build: `npm run build` passed.
+Database verification: `uq_users_auth_user_id` exists; M2 demo bidder, tender, and document counts remain unchanged.
+
+## M3 — Role-Based Signup
+
+M3 reuses M3A Supabase Auth and adds explicit role/profile provisioning only.
+
+- `/signup` requires an explicit account type; no role is selected by default.
+- Only `BIDDER` and `OFFICER` can pass backend validation.
+- BIDDER signup collects `full_name`, required `legal_name`, and the existing optional bidder fields: registration number, GST number, and PAN number.
+- OFFICER signup collects only the required application `full_name`; `OfficerProfile` contributes only its existing `user_id` and timestamps.
+- After Supabase Auth returns an authenticated session, the frontend calls `/api/v1/auth/provision` with the bearer token.
+- The backend creates `users.auth_user_id`, `users.role`, and exactly one role-specific profile in one database transaction.
+- BIDDER creates `Bidder`; OFFICER creates `OfficerProfile`; the opposite profile is never requested or created.
+- Duplicate Auth mappings, duplicate emails, duplicate profiles, invalid roles, and missing bidder company names are rejected safely.
+- Existing M2 demo organizations and all historical records remain unchanged.
+
+Focused M3 tests: `14 passed` including authentication compatibility tests.
+Full backend regression: `368 passed, 1 warning`.
+Frontend build: `npm run build` passed.
+
+When Supabase email confirmation is enabled, signup may return without a session. In that case no application profile is created until a confirmed authenticated session is available; the UI reports this limitation without creating an orphaned application record.
+
+## M4 — Authentication + Backend Role Enforcement
+
+M4 makes the backend the authorization boundary while reusing M3A authentication. `get_authenticated_identity` remains the single Supabase bearer-token and application-User resolution path. `require_role(ApplicationRole.BIDDER/OFFICER)` is centralized in `backend/app/authz/dependencies.py`; legacy `admin` and `procurement_officer` values are not silently treated as canonical roles.
+
+Protected boundaries:
+
+- Officer-only: `GET /api/v1/tenders/{id}/bidders`, `GET /api/v1/dashboard/summary`, `GET /api/v1/tenders/{tender_id}/dashboard`, and `GET /api/v1/tenders/{tender_id}/dashboard/requirements`.
+- Bidder-owned: `GET /api/v1/bidders/{id}`, `POST/GET /api/v1/bidders/{bidder_id}/documents`.
+- Document ownership: document metadata, signed access, OCR, AI, retry, and government-verification routes allow the owning BIDDER or an OFFICER.
+
+Ownership is resolved from the authenticated application User to `Bidder.user_id`; path, query, body, and `X-Role` values are never used as identity or role authority. Existing legacy contract tests use a test-only dependency override in `backend/tests/conftest.py`; production routes retain the real dependencies.
+
+Focused M4 security tests: `22 passed`.
+Full backend regression: `390 passed, 1 warning`.
+No migration was required. No frontend source was changed for M4.
+
+All sensitive bidder, tender, document, compliance, evidence, verification, requirement, review, audit, and dashboard routes now require centralized authentication and role/ownership authorization. Only health and authentication operations remain intentionally public or authentication-scoped.
+
 ## Next Milestone
 
-Milestone 03 — Role-Based Signup
+Milestone 05 — Frontend Role-Based Routing
 
 ## STRICT DO NOT
 
-- implement authentication
-- implement signup
-- implement login
+- implement dashboards
 - implement RBAC
 - create role middleware
 - create dashboards
@@ -154,13 +230,14 @@ Milestone 03 — Role-Based Signup
 - modify officer review
 - modify workers
 - modify historical migrations
-- implement authentication
-- implement RBAC middleware
-- add authentication, signup, or authorization in M02
+- implement frontend route guards before M5
 
-Focused M2 tests: `6 passed`.
-Targeted regression repairs for the new ownership invariant: `4 passed`.
-Full backend regression suite: `354 passed, 1 warning`.
-ORM verification covers canonical roles, legacy compatibility, one bidder per user, duplicate bidder rejection, one officer profile per user, and preserved tender/review foreign keys.
+AUTHENTICATION IS IMPLEMENTED.
 
-M2 does not implement authentication, signup, frontend RBAC, route guards, dashboards, password handling, JWT handling, Supabase Auth, or authorization. M3 starts from this completed database identity/profile foundation.
+ROLE-BASED SIGNUP IS IMPLEMENTED.
+
+BACKEND RBAC IS IMPLEMENTED.
+
+FRONTEND ROLE-BASED ROUTING IS NOT YET IMPLEMENTED.
+
+Milestone 05 may add frontend route protection as UX. Backend role enforcement remains the security boundary.

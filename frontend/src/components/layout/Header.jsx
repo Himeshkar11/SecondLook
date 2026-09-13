@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import Badge from '../common/Badge.jsx';
+import { useAuth } from '../../auth/AuthContext.jsx';
 
 /**
  * Enterprise Portal Header
@@ -11,6 +12,7 @@ import Badge from '../common/Badge.jsx';
  * - Auditor status profile chip
  */
 export default function Header({ onToggleSidebar }) {
+  const { user, signOut } = useAuth();
   const [theme, setTheme] = useState(() => {
     return localStorage.getItem('secondlook-theme') || 'light';
   });
@@ -158,9 +160,30 @@ export default function Header({ onToggleSidebar }) {
                 fontSize: 'var(--font-size-xs)',
               }}
             >
-              AO
+              {user?.email?.slice(0, 2).toUpperCase() || 'AO'}
             </div>
-            <span style={{ fontWeight: 'var(--font-weight-medium)' }}>Auditor Officer</span>
+            <span style={{ fontWeight: 'var(--font-weight-medium)' }}>
+              {user?.email || 'Unauthenticated'}
+            </span>
+            {user ? (
+              <button
+                type="button"
+                onClick={() => signOut()}
+                style={{
+                  padding: 'var(--space-1) var(--space-2)',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-text-secondary)',
+                  fontSize: 'var(--font-size-xs)',
+                }}
+              >
+                Sign out
+              </button>
+            ) : (
+              <Link to="/login" style={{ fontSize: 'var(--font-size-xs)' }}>
+                Sign in
+              </Link>
+            )}
           </div>
         </div>
       </div>

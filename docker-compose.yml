@@ -7,6 +7,8 @@ services:
       - "${FRONTEND_PORT:-5173}:5173"
     environment:
       VITE_API_BASE_URL: http://backend:${BACKEND_PORT:-8000}
+      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:-}
       APP_ENV: ${APP_ENV:-development}
     volumes:
       - ./frontend:/app
