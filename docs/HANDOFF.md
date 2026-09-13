@@ -1,8 +1,8 @@
-# SecondLook Milestone 05 Handoff
+# SecondLook Milestone 06 Handoff
 
 ## Exact Stopping Point
 
-Milestones 02, M3A Authentication Foundation, M3 Role-Based Signup, M4 Backend Role Enforcement, and M5 Frontend Role-Based Routing + Navigation are complete. Supabase Auth login, session restoration, logout, backend identity resolution, explicit role selection, role-specific profile creation, centralized role enforcement, ownership boundaries, centralized ProtectedRoute frontend route protection, and role-aware navigation are implemented. Landing redesign and 3D visual experience belong to Milestone 06.
+Milestones 02, M3A Authentication Foundation, M3 Role-Based Signup, M4 Backend Role Enforcement, M5 Frontend Role-Based Routing + Navigation, and M6 SecondLook Landing Page + 3D Experience are complete. The public landing page, SecondLook product narrative, 5-step deterministic workflow, evidence chain architecture, AI+Human control principles, role signup CTAs, and lightweight code-split 3D hero visualization are implemented. Bidder profile and bidder workspace belong to Milestone 07.
 
 The investigation and executed resolution are documented in [docs/M2_BLOCKER_ANALYSIS.md](M2_BLOCKER_ANALYSIS.md). The local rollback snapshot is `m2_reconciliation_snapshot.json` and is intentionally uncommitted.
 
@@ -326,9 +326,42 @@ FRONTEND ROUTE PROTECTION IS IMPLEMENTED FOR UX/NAVIGATION.
 
 BACKEND RBAC REMAINS THE AUTHORITATIVE SECURITY BOUNDARY.
 
+## M6 SecondLook Landing Page + 3D Experience
+
+The public product experience on `/` is implemented:
+- `LandingPage.jsx`: Public product narrative explaining the 5-step deterministic evaluation process (Upload → Extract → Verify → Evaluate → Review), evidence chain architecture, and AI+human control principle.
+- `Hero3D.jsx`: Interactive Three.js "Evidence & Compliance Inspection Constellation" featuring a rotating faceted gateway core, orbital document cards, and statutory verification nodes. Code-split via `React.lazy` with automatic `IntersectionObserver` pause and SVG/CSS fallback.
+- `PublicNavbar.jsx`: Dedicated public navigation with brand tricolor accent, semantic anchor links, light/dark theme toggle, and direct role signup CTAs.
+- Direct Role CTAs: `Sign up as Bidder` (`/signup?role=bidder`) and `Sign up as Officer` (`/signup?role=officer`) connecting to the existing signup flow with preselected account type cards.
+- Layout: `MainLayout.jsx` automatically renders a full-width experience without internal enterprise sidebar for unauthenticated visitors on `/`.
+- Dynamic Root: Authenticated users visiting `/` continue redirecting to their canonical role workspace (`/bidder` or `/officer`) via `RootRoute`.
+
+Authentication and Security Boundary:
+- Authentication/RBAC architecture was not redesigned.
+- Backend RBAC enforcement was not changed.
+- `AuthContext` and `ProtectedRoute` were not changed.
+- `SignupPage.jsx` was modified only to support landing-page role preselection via `?role=bidder` / `?role=officer`.
+- The signup query parameter remains UI-only.
+- Backend `/api/v1/auth/provision` remains authoritative for role validation.
+
+Frontend build: `npm run build` passed.
+Full backend regression: `390 passed, 1 warning`.
+
+LANDING PAGE IMPLEMENTED.
+
+AUTHENTICATION/RBAC NOT REDESIGNED.
+
+BACKEND RBAC REMAINS THE AUTHORITATIVE SECURITY BOUNDARY.
+
+BIDDER DASHBOARD NOT IMPLEMENTED.
+
+OFFICER DASHBOARD NOT IMPLEMENTED.
+
+MILESTONE 07 NOT STARTED.
+
 ## Next Milestone Instructions
 
-Milestone 06 is **Landing Page + 3D Experience**.
+Milestone 07 is **Bidder Profile + Bidder Workspace**.
 
 AUTHENTICATION IS IMPLEMENTED.
 
@@ -338,4 +371,6 @@ BACKEND RBAC IS IMPLEMENTED.
 
 FRONTEND ROLE-BASED ROUTING IS IMPLEMENTED.
 
-Milestone 06 will implement the public SecondLook landing page and 3D procurement visual experience under `frontend/src/components/landing/`.
+LANDING PAGE + 3D EXPERIENCE IS IMPLEMENTED.
+
+Milestone 07 will implement the bidder profile and bidder workspace foundations under `frontend/src/pages/bidder/`.

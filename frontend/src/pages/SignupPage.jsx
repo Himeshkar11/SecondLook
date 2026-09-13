@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import PageContainer from '../components/layout/PageContainer.jsx';
 import { useAuth } from '../auth/AuthContext.jsx';
 
@@ -28,8 +28,26 @@ const roleOptions = [
 
 export default function SignupPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
   const { signUp, isConfigured, configurationError } = useAuth();
-  const [role, setRole] = useState(null);
+
+  const getInitialRole = () => {
+    const queryRole = (searchParams.get('role') || location.state?.role || '').toUpperCase();
+    if (queryRole === 'BIDDER' || queryRole === 'OFFICER') {
+      return queryRole;
+    }
+    return null;
+  };
+
+  const [role, setRole] = useState(getInitialRole);
+
+  useEffect(() => {
+    const nextRole = getInitialRole();
+    if (nextRole && nextRole !== role) {
+      setRole(nextRole);
+    }
+  }, [searchParams, location.state]);
   const [form, setForm] = useState({
     email: '',
     password: '',

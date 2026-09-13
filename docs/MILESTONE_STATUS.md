@@ -1,7 +1,7 @@
 # SecondLook Milestone Status
 
-Current Milestone: 05 — Frontend Role-Based Routing + Navigation
-Status: COMPLETED / READY FOR REVIEW
+Current Milestone: 06 — Landing Page + 3D Experience
+Status: COMPLETED
 
 ## What Was Inspected
 
@@ -241,9 +241,47 @@ FRONTEND ROUTE PROTECTION IS IMPLEMENTED FOR UX/NAVIGATION.
 
 BACKEND RBAC REMAINS THE AUTHORITATIVE SECURITY BOUNDARY.
 
+## M6 — SecondLook Landing Page + 3D Experience
+
+M6 establishes the public product narrative and lightweight 3D visual hero on the frontend root route (`/`) without modifying backend authentication, backend RBAC, or procurement business logic:
+
+- `LandingPage.jsx`: Public product narrative explaining SecondLook's 5-step deterministic procurement evaluation pipeline (Upload → Extract → Verify → Evaluate → Review).
+- `Hero3D.jsx`: Interactive Three.js "Evidence & Compliance Inspection Constellation" featuring a rotating faceted gateway core, orbital document cards, and statutory verification nodes.
+  - Lifecycle: `IntersectionObserver` halts the render loop when off-screen; full disposal on unmount.
+  - Accessibility: Respects `prefers-reduced-motion` media queries.
+  - Reliability: Graceful SVG/CSS fallback if WebGL is unavailable or fails.
+  - Performance: Code-split via `React.lazy` into an isolated chunk to maintain fast initial page load times.
+- `PublicNavbar.jsx`: Dedicated public navigation with brand tricolor accent, semantic anchor links, light/dark theme toggle, and direct role signup CTAs.
+- Direct Role CTAs (`Sign up as Bidder` / `Sign up as Officer`) connecting to `/signup?role=bidder` and `/signup?role=officer` with preselected account type cards.
+- Layout Integration: `MainLayout.jsx` automatically presents a full-width experience without internal enterprise sidebar for unauthenticated visitors on `/`.
+- Dynamic Root Preservation: Authenticated users visiting `/` continue redirecting to their canonical role workspace (`/bidder` or `/officer`) via `RootRoute`.
+
+Authentication and Security Boundary:
+- Authentication/RBAC architecture was not redesigned.
+- Backend RBAC enforcement was not changed.
+- `AuthContext` and `ProtectedRoute` were not changed.
+- `SignupPage.jsx` was modified only to support landing-page role preselection via `?role=bidder` / `?role=officer`.
+- The signup query parameter remains UI-only.
+- Backend `/api/v1/auth/provision` remains authoritative for role validation.
+
+Frontend build: `npm run build` passed (with code-split 3D bundle).
+Full backend regression: `390 passed, 1 warning`.
+
+LANDING PAGE IMPLEMENTED.
+
+AUTHENTICATION/RBAC NOT REDESIGNED.
+
+BACKEND RBAC REMAINS THE AUTHORITATIVE SECURITY BOUNDARY.
+
+BIDDER DASHBOARD NOT IMPLEMENTED.
+
+OFFICER DASHBOARD NOT IMPLEMENTED.
+
+MILESTONE 07 NOT STARTED.
+
 ## Next Milestone
 
-Milestone 06 — Landing Page + 3D Experience
+Milestone 07 — Bidder Profile + Bidder Workspace
 
 ## STRICT DO NOT
 
@@ -257,12 +295,4 @@ Milestone 06 — Landing Page + 3D Experience
 - modify officer review
 - modify workers
 - modify historical migrations
-- start Milestone 06 before review
-
-AUTHENTICATION IS IMPLEMENTED.
-
-ROLE-BASED SIGNUP IS IMPLEMENTED.
-
-BACKEND RBAC IS IMPLEMENTED.
-
-FRONTEND ROLE-BASED ROUTING IS IMPLEMENTED.
+- start Milestone 07 before review

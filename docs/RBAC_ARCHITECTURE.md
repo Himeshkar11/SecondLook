@@ -437,8 +437,27 @@ The following systems are protected and must be wrapped by the future product/RB
 - What RLS/service-role boundary will be used with backend-mediated access?
 - Which legacy/demo endpoints can be retired after the role-specific APIs exist?
 
-## Milestone 01 Boundary
+## Milestone 06 Public Experience & Routing Architecture
 
-No source, migration, dependency, or runtime behavior was changed. The next implementation milestone is:
+Milestone 06 implements the public landing experience and product narrative on `/`:
 
-**Milestone 02 — Database User/Role Foundation**
+```text
+/ (Public Visitor) ──────────► LandingPage (PublicNavbar + 5-step workflow + 3D Hero + Role CTAs)
+/ (Authenticated BIDDER) ────► /bidder
+/ (Authenticated OFFICER) ───► /officer
+/login ──────────────────────► LoginPage
+/signup?role=bidder ─────────► SignupPage (Preselected BIDDER)
+/signup?role=officer ────────► SignupPage (Preselected OFFICER)
+```
+
+Authentication and Security Boundary:
+- Authentication/RBAC architecture was not redesigned.
+- Backend RBAC enforcement was not changed.
+- `AuthContext` and `ProtectedRoute` were not changed.
+- `SignupPage.jsx` was modified only to support landing-page role preselection via `?role=bidder` / `?role=officer`.
+- The signup query parameter remains UI-only.
+- Backend `/api/v1/auth/provision` remains authoritative for role validation.
+
+FRONTEND ROUTE PROTECTION IS IMPLEMENTED FOR UX/NAVIGATION.
+
+BACKEND RBAC REMAINS THE AUTHORITATIVE SECURITY BOUNDARY.

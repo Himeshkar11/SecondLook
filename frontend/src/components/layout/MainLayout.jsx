@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { useAuth } from '../../auth/AuthContext.jsx';
 import Header from './Header.jsx';
 import Sidebar from './Sidebar.jsx';
 
@@ -6,9 +8,17 @@ import Sidebar from './Sidebar.jsx';
  * Main application layout wrapper
  * Desktop: persistent sidebar + top header
  * Mobile/tablet: collapsible sidebar drawer
+ * Public Landing: rendered full-width without enterprise sidebar for unauthenticated visitors
  */
 export default function MainLayout({ children }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const location = useLocation();
+  const { isAuthenticated, isAuthResolving } = useAuth();
+
+  // If visitor is on the public landing page (and not authenticated), render full-width landing directly
+  if (location.pathname === '/' && !isAuthenticated && !isAuthResolving) {
+    return <div style={{ minHeight: '100vh' }}>{children}</div>;
+  }
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>

@@ -20,9 +20,13 @@ import LoginPage from './pages/LoginPage.jsx';
 import SignupPage from './pages/SignupPage.jsx';
 import BidderWorkspacePage from './pages/bidder/BidderWorkspacePage.jsx';
 
+const LandingPage = React.lazy(() => import('./pages/LandingPage.jsx'));
+
 /**
  * RootRoute: Resolves initial entry point based on authentication & role state.
  * Prevents premature redirect flicker during auth resolution.
+ * - Authenticated: routes directly to role workspace (/bidder or /officer)
+ * - Visitor: renders the public SecondLook landing page
  */
 function RootRoute() {
   const { isAuthenticated, role, isAuthResolving } = useAuth();
@@ -43,7 +47,24 @@ function RootRoute() {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    return (
+      <React.Suspense
+        fallback={
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: '60vh',
+            }}
+          >
+            <Loading message="Loading SecondLook..." size="lg" />
+          </div>
+        }
+      >
+        <LandingPage />
+      </React.Suspense>
+    );
   }
 
   if (role === 'BIDDER') {
