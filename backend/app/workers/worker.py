@@ -31,12 +31,16 @@ from app.workers.jobs import (
     DocumentAIStatus,
     DocumentOCRJobRecord,
     DocumentOCRStatus,
+    DocumentVerificationJobRecord,
+    DocumentVerificationStatus,
     JobQueue,
     JobStatus,
     VerificationJobRecord,
     document_ai_queue,
     document_ocr_queue,
+    document_verification_queue,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -467,3 +471,101 @@ class DocumentAIWorker:
         finally:
             if should_close and session is not None:
                 session.close()
+
+
+class DocumentVerificationWorker:
+    """Worker responsible for executing statutory government verification jobs.
+
+    Steps:
+    1. Retrieve queued verification job or process document by ID.
+    2. Enforce idempotency: prevent processing if already PROCESSING or COMPLETED.
+    3. Verify AI extraction prerequisite:
+       - AI status must be AI_COMPLETED.
+       - Extracted structured data must exist and contain the required identifier.
+       - If AI failed or not completed, verification is blocked and transitioned to FAILED.
+    4. Transition job to PROCESSING.
+    5. Delegate to GovernmentVerificationService.
+    6. Transition job to COMPLETED or FAILED based on verification outcome.
+    """
+
+    def __init__(
+        self,
+        verification_service: Optional[Any] = None,
+        queue: Optional[JobQueue] = None,
+        db: Optional[Session] = None,
+    ) -> None:
+        from app.services.government_verification_service import GovernmentVerificationService
+        self.verification_service = verification_service if verification_service is not None else GovernmentVerificationService(db=db)
+        self.queue = queue if queue is not None else document_verification_queue
+        self.db = db
+
+    def process_job(
+        self,
+        job: DocumentVerificationJobRecord,
+        force_retry: bool = False,
+    ) -> DocumentVerificationJobRecord:
+        """Process a single statutory government verification job."""
+        if not force_retry:
+            if job.status == DocumentVerificationStatus.PROCESSING:
+                logger.warning("Job %s for document %s is already in PROCESSING. Skipping.", job.job_id, job.document_id)
+                return job
+            if job.status == DocumentVerificationStatus.COMPLETED:
+                logger.info("Job %s for document %s is already COMPLETED. Skipping.", job.job_id, job.document_id)
+                return job
+
+        job.transition_to(DocumentVerificationStatus.PROCESSING)
+        job.attempt_count += 1
+        self.queue.update_job(job)
+
+        try:
+            result = self.verification_service.verify_document(job.document_id, force=force_retry)
+            job.result = result
+            if result.get("status") == "COMPLETED":
+                job.transition_to(DocumentVerificationStatus.COMPLETED)
+            else:
+                job.transition_to(DocumentVerificationStatus.FAILED, error=result.get("error"))
+        except Exception as exc:
+            error_msg = f"Verification failed: {str(exc)}"
+            logger.error("Error running government verification on document %s: %s", job.document_id, exc)
+            job.transition_to(DocumentVerificationStatus.FAILED, error=error_msg)
+        finally:
+            self.queue.update_job(job)
+
+        return job
+
+    def process_document_by_id(
+        self,
+        document_id: str,
+        force_retry: bool = False,
+    ) -> Optional[DocumentVerificationJobRecord]:
+        """Create or locate job and run verification for a specific document."""
+        session = self.db
+        should_close = False
+        if session is None and SessionLocal is not None:
+            session = SessionLocal()
+            should_close = True
+
+        try:
+            doc_uuid = uuid.UUID(document_id)
+            doc = session.scalar(select(Document).where(Document.id == doc_uuid)) if session else None
+            if not doc:
+                logger.error("Cannot process verification for nonexistent document %s", document_id)
+                return None
+
+            job = self.queue.get_document_verification_job(document_id)
+            if not job:
+                job = DocumentVerificationJobRecord(
+                    document_id=str(doc.id),
+                    bidder_id=str(doc.bidder_id),
+                    document_type=doc.document_type,
+                    status=DocumentVerificationStatus.PENDING,
+                )
+                self.queue.enqueue(job)
+            elif force_retry or job.status == DocumentVerificationStatus.FAILED:
+                job.transition_to(DocumentVerificationStatus.PENDING)
+
+            return self.process_job(job, force_retry=force_retry)
+        finally:
+            if should_close and session is not None:
+                session.close()
+

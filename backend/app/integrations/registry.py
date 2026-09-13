@@ -68,3 +68,28 @@ def get_integration(provider: str) -> GovernmentIntegration:
     """
     provider_cls = registry.get(provider)
     return provider_cls()
+
+
+def get_government_provider(source: str) -> GovernmentProvider:
+    """Factory helper for statutory GovernmentProvider instances (Task 10).
+
+    Supports:
+        GST -> GSTProvider / DemoGSTProvider
+        PAN -> PANProvider / DemoPANProvider
+    """
+    from app.config.settings import settings
+    from app.integrations.gst import DemoGSTProvider, GSTProvider
+    from app.integrations.pan import DemoPANProvider, PANProvider
+
+    normalized = (source or "").strip().upper()
+    if normalized == "GST":
+        if (settings.gst_provider or "demo").lower() == "demo":
+            return DemoGSTProvider()
+        return GSTProvider()
+    elif normalized == "PAN":
+        if (settings.pan_provider or "demo").lower() == "demo":
+            return DemoPANProvider()
+        return PANProvider()
+    else:
+        raise ValueError(f"Unsupported statutory verification source: '{source}'. Only GST and PAN are supported in Task 10.")
+

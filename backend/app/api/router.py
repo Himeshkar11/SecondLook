@@ -17,10 +17,18 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_api_request_context, get_db
 from app.services.bidder_service import BidderService
 from app.services.document_service import DocumentService
+from app.services.government_verification_service import (
+    AIExtractionPrerequisiteError,
+    GovernmentVerificationService,
+    InvalidIdentifierFormatError,
+    MissingIdentifierError,
+    UnsupportedDocumentTypeError,
+)
 from app.services.tender_service import TenderService
 from app.services.verification_service import VerificationService
 from app.workers.jobs import DocumentOCRStatus
-from app.workers.worker import DocumentAIWorker, DocumentOCRWorker
+from app.workers.worker import DocumentAIWorker, DocumentOCRWorker, DocumentVerificationWorker
+
 
 logger = logging.getLogger(__name__)
 
@@ -315,7 +323,49 @@ def retry_document_ai(document_id: str, background_tasks: BackgroundTasks, db: S
         raise HTTPException(status_code=500, detail={"error": {"code": "RETRY_FAILED", "message": str(exc), "details": {}}}) from exc
 
 
+@router.post("/documents/{document_id}/verify", tags=["Documents"], summary="Run statutory government verification", responses={
+    200: {"description": "Document verification result."},
+    400: {"description": "Prerequisite not met."},
+    404: {"description": "Document not found."},
+    422: {"description": "Validation or format error."},
+    500: {"description": "Internal server error."}
+})
+def verify_document(document_id: str, db: Session = Depends(get_db)):
+    """Trigger statutory government verification for a document with completed AI extraction."""
+    service = GovernmentVerificationService(db=db)
+    try:
+        result = service.verify_document(document_id)
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": str(exc), "details": {}}}) from exc
+    except AIExtractionPrerequisiteError as exc:
+        raise HTTPException(status_code=400, detail={"error": {"code": "AI_PREREQUISITE_FAILED", "message": str(exc), "details": {}}}) from exc
+    except (UnsupportedDocumentTypeError, MissingIdentifierError, InvalidIdentifierFormatError) as exc:
+        raise HTTPException(status_code=422, detail={"error": {"code": "VALIDATION_ERROR", "message": str(exc), "details": {}}}) from exc
+    except Exception as exc:
+        logger.error("Failed to verify document %s: %s", document_id, exc)
+        raise HTTPException(status_code=500, detail={"error": {"code": "VERIFICATION_FAILED", "message": str(exc), "details": {}}}) from exc
+
+
+@router.get("/documents/{document_id}/verification", tags=["Documents"], summary="Get document statutory verification details", responses={
+    200: {"description": "Document verification details and comparison history."},
+    404: {"description": "Document not found."},
+    500: {"description": "Database query error."}
+})
+def get_document_verification(document_id: str, db: Session = Depends(get_db)):
+    """Retrieve statutory verification status, field comparisons, and history for a document."""
+    service = GovernmentVerificationService(db=db)
+    try:
+        verification_info = service.get_document_verification(document_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to load document verification details", "details": {}}}) from exc
+    if verification_info is None:
+        raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Document not found", "details": {}}})
+    return verification_info
+
+
 @router.get("/documents/{document_id}", tags=["Documents"], summary="Get document metadata", responses={
+
     200: {"description": "Document metadata."},
     404: {"description": "Document not found."},
     500: {"description": "Database query error."}

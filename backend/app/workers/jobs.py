@@ -252,9 +252,70 @@ class JobQueue:
                 count += 1
             elif isinstance(j, DocumentAIJobRecord) and j.status == DocumentAIStatus.AI_PENDING:
                 count += 1
+            elif isinstance(j, DocumentVerificationJobRecord) and j.status == DocumentVerificationStatus.PENDING:
+                count += 1
             elif isinstance(j, VerificationJobRecord) and j.status == JobStatus.QUEUED:
                 count += 1
         return count
+
+    def get_document_verification_job(self, document_id: str) -> Optional[DocumentVerificationJobRecord]:
+        """Fetch a statutory verification job by document ID."""
+        for j in self._jobs.values():
+            if isinstance(j, DocumentVerificationJobRecord) and j.document_id == document_id:
+                return j
+        return None
+
+
+class DocumentVerificationStatus(str, Enum):
+    """Controlled statutory verification lifecycle statuses (Task 10)."""
+
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class DocumentVerificationJobRecord(BaseModel):
+    """Job container representing an asynchronous statutory government verification request."""
+
+    job_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    document_id: str = Field(..., description="Document identifier")
+    bidder_id: Optional[str] = Field(None, description="Bidder or vendor identifier")
+    document_type: str = Field(default="GST", description="Document type: GST or PAN")
+    status: DocumentVerificationStatus = Field(default=DocumentVerificationStatus.PENDING, description="Lifecycle status")
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    completed_at: Optional[str] = Field(None, description="Completion timestamp")
+    result: Optional[Dict[str, Any]] = Field(None, description="Verification comparison result")
+    error: Optional[str] = Field(None, description="Failure reason if execution failed")
+    attempt_count: int = Field(default=0, ge=0, description="Execution attempts")
+
+    def transition_to(self, new_status: DocumentVerificationStatus, error: Optional[str] = None) -> None:
+        """Enforce strict status transitions for statutory verification:
+        PENDING -> PROCESSING or FAILED
+        PROCESSING -> COMPLETED or FAILED
+        FAILED -> PENDING (for retry)
+        """
+        valid_transitions = {
+            DocumentVerificationStatus.PENDING: {DocumentVerificationStatus.PROCESSING, DocumentVerificationStatus.FAILED},
+            DocumentVerificationStatus.PROCESSING: {DocumentVerificationStatus.COMPLETED, DocumentVerificationStatus.FAILED},
+            DocumentVerificationStatus.COMPLETED: set(),
+            DocumentVerificationStatus.FAILED: {DocumentVerificationStatus.PENDING},
+        }
+
+        allowed = valid_transitions.get(self.status, set())
+        if new_status not in allowed:
+            raise InvalidStateTransitionError(
+                f"Cannot transition verification job {self.job_id} from {self.status} to {new_status}"
+            )
+
+        self.status = new_status
+        now_str = datetime.now(timezone.utc).isoformat()
+        self.updated_at = now_str
+        if new_status == DocumentVerificationStatus.COMPLETED:
+            self.completed_at = now_str
+        if error:
+            self.error = error
 
 
 # Global in-memory OCR job queue instance
@@ -262,3 +323,7 @@ document_ocr_queue = JobQueue()
 
 # Global in-memory AI extraction job queue instance
 document_ai_queue = JobQueue()
+
+# Global in-memory statutory government verification job queue instance
+document_verification_queue = JobQueue()
+

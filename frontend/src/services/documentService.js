@@ -63,3 +63,14 @@ export async function retryDocumentAI(documentId) {
     method: 'POST',
   });
 }
+
+export async function verifyDocument(documentId) {
+  return apiClient(`/api/v1/documents/${encodeURIComponent(documentId)}/verify`, {
+    method: 'POST',
+  });
+}
+
+export async function getDocumentVerification(documentId) {
+  return apiClient(`/api/v1/documents/${encodeURIComponent(documentId)}/verification`);
+}
+

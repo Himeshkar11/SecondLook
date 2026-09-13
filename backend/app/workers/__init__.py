@@ -9,27 +9,35 @@ from app.workers.jobs import (
     DocumentAIStatus,
     DocumentOCRJobRecord,
     DocumentOCRStatus,
+    DocumentVerificationJobRecord,
+    DocumentVerificationStatus,
     InvalidStateTransitionError,
     JobQueue,
     JobStatus,
     VerificationJobRecord,
     document_ai_queue,
     document_ocr_queue,
+    document_verification_queue,
 )
-from app.workers.worker import DocumentAIWorker, DocumentOCRWorker, Worker
+from app.workers.worker import DocumentAIWorker, DocumentOCRWorker, DocumentVerificationWorker, Worker
 
 __all__ = [
     "JobStatus",
     "DocumentOCRStatus",
     "DocumentAIStatus",
+    "DocumentVerificationStatus",
     "VerificationJobRecord",
     "DocumentOCRJobRecord",
     "DocumentAIJobRecord",
+    "DocumentVerificationJobRecord",
     "JobQueue",
     "InvalidStateTransitionError",
     "document_ocr_queue",
     "document_ai_queue",
+    "document_verification_queue",
     "Worker",
     "DocumentOCRWorker",
     "DocumentAIWorker",
+    "DocumentVerificationWorker",
 ]
+

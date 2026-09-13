@@ -12,8 +12,11 @@ import {
   getDocumentAccess,
   getDocumentOCR,
   retryDocumentOCR,
+  getDocumentVerification,
+  verifyDocument,
 } from '../services/documentService.js';
 import { getBidders } from '../services/bidderService.js';
+
 
 const DOCUMENT_TYPES = [
   { value: 'GST', label: 'GST Registration Certificate' },
@@ -59,6 +62,14 @@ export default function DocumentsPage() {
   const [activeOcrDoc, setActiveOcrDoc] = useState(null);
   const [ocrLoading, setOcrLoading] = useState(false);
   const [retryingDocId, setRetryingDocId] = useState(null);
+
+  // Government Verification Modal State
+  const [verificationModalOpen, setVerificationModalOpen] = useState(false);
+  const [activeVerificationDoc, setActiveVerificationDoc] = useState(null);
+  const [verificationLoading, setVerificationLoading] = useState(false);
+  const [verifyingDocId, setVerifyingDocId] = useState(null);
+  const [verificationError, setVerificationError] = useState(null);
+
 
   // Polling ref to prevent concurrent poll runs
   const pollingTimerRef = useRef(null);
@@ -242,6 +253,83 @@ export default function DocumentsPage() {
         return <Badge variant="neutral">{s || 'Uploaded'}</Badge>;
     }
   };
+
+  // Handle View Verification Details
+  const handleViewVerification = async (doc) => {
+    setActiveVerificationDoc(doc);
+    setVerificationModalOpen(true);
+    setVerificationLoading(true);
+    setVerificationError(null);
+    try {
+      const data = await getDocumentVerification(doc.id);
+      setActiveVerificationDoc({
+        ...doc,
+        verificationData: data,
+      });
+    } catch (err) {
+      setVerificationError(err.message || 'Unable to retrieve government verification details');
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+
+  // Handle Run Statutory Verification
+  const handleRunVerification = async (docId) => {
+    setVerifyingDocId(docId);
+    setVerificationError(null);
+    try {
+      await verifyDocument(docId);
+      const data = await getDocumentVerification(docId);
+      setActiveVerificationDoc((prev) => ({
+        ...prev,
+        verificationData: data,
+      }));
+      const docsRes = await getAllDocuments(selectedBidderFilter || null, 1, 100);
+      setDocuments(docsRes.items || []);
+    } catch (err) {
+      setVerificationError(err.message || 'Government verification request failed');
+    } finally {
+      setVerifyingDocId(null);
+    }
+  };
+
+  // Controlled Government Verification Badge
+  const getVerificationBadge = (status) => {
+    const s = (status || '').toUpperCase();
+    switch (s) {
+      case 'VERIFIED':
+        return <Badge variant="success">✓ Verified</Badge>;
+      case 'MISMATCH':
+        return <Badge variant="danger">⚠ Mismatch</Badge>;
+      case 'NOT_FOUND':
+        return <Badge variant="warning">? Not Found</Badge>;
+      case 'SOURCE_ERROR':
+        return <Badge variant="danger">✕ Source Error</Badge>;
+      case 'PROCESSING':
+        return <Badge variant="info">● Processing</Badge>;
+      case 'VERIFICATION_PENDING':
+      case 'PENDING':
+      default:
+        return <Badge variant="neutral">Pending</Badge>;
+    }
+  };
+
+  // Field Match Badge
+  const getFieldStatusBadge = (status) => {
+    switch (status) {
+      case 'MATCH':
+        return <Badge variant="success">MATCH</Badge>;
+      case 'MISMATCH':
+        return <Badge variant="danger">MISMATCH</Badge>;
+      case 'MISSING_FROM_DOCUMENT':
+        return <Badge variant="warning">MISSING IN DOC</Badge>;
+      case 'MISSING_FROM_SOURCE':
+        return <Badge variant="neutral">MISSING IN GOVT</Badge>;
+      default:
+        return <Badge variant="neutral">{status || '—'}</Badge>;
+    }
+  };
+
 
   // Distinct lifecycle statuses for summary counts
   const summaryStatuses = [
@@ -554,6 +642,7 @@ export default function DocumentsPage() {
                     <th style={{ padding: 'var(--space-3) var(--space-4)' }}>Filename</th>
                     <th style={{ padding: 'var(--space-3) var(--space-4)' }}>Size</th>
                     <th style={{ padding: 'var(--space-3) var(--space-4)' }}>OCR Status</th>
+                    <th style={{ padding: 'var(--space-3) var(--space-4)' }}>Govt Verification</th>
                     <th style={{ padding: 'var(--space-3) var(--space-4)' }}>Uploaded Date</th>
                     <th style={{ padding: 'var(--space-3) var(--space-5)', textAlign: 'right' }}>Actions</th>
                   </tr>
@@ -563,6 +652,8 @@ export default function DocumentsPage() {
                     const ocrStatus = (doc.ocr_status || doc.status || '').toUpperCase();
                     const isCompleted = ocrStatus === 'OCR_COMPLETED';
                     const isFailed = ocrStatus === 'OCR_FAILED';
+                    const docType = (doc.document_type || doc.type || '').toUpperCase();
+                    const supportsGovVerification = docType === 'GST' || docType === 'PAN';
 
                     return (
                       <tr
@@ -599,11 +690,29 @@ export default function DocumentsPage() {
                         <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
                           {getDocStatusBadge(ocrStatus)}
                         </td>
+                        <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                          {supportsGovVerification ? (
+                            getVerificationBadge(doc.verification_status || doc.verificationStatus)
+                          ) : (
+                            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>N/A</span>
+                          )}
+                        </td>
                         <td style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
                           {doc.uploadedDate || (doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString('en-GB') : '—')}
                         </td>
                         <td style={{ padding: 'var(--space-3) var(--space-5)', textAlign: 'right' }}>
                           <div style={{ display: 'inline-flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+                            {supportsGovVerification && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleViewVerification(doc)}
+                                title="View government verification details"
+                                style={{ borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}
+                              >
+                                🏛 Verify Govt
+                              </Button>
+                            )}
                             {isCompleted && (
                               <Button
                                 variant="outline"
@@ -640,6 +749,7 @@ export default function DocumentsPage() {
                       </tr>
                     );
                   })}
+
                 </tbody>
               </table>
             </div>
@@ -715,6 +825,194 @@ export default function DocumentsPage() {
           </div>
         )}
       </Modal>
+
+      {/* Government Verification Modal (Task 10) */}
+      <Modal
+        isOpen={verificationModalOpen}
+        onClose={() => setVerificationModalOpen(false)}
+        title={`Government Verification — ${activeVerificationDoc?.file_name || 'Document'}`}
+        maxWidth="850px"
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={verifyingDocId === activeVerificationDoc?.id}
+              onClick={() => handleRunVerification(activeVerificationDoc?.id)}
+              style={{ borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}
+            >
+              {verifyingDocId === activeVerificationDoc?.id ? 'Verifying with Govt Source...' : '↻ Re-verify with Govt Source'}
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => setVerificationModalOpen(false)}>
+              Close
+            </Button>
+          </div>
+        }
+      >
+        {verificationLoading ? (
+          <Loading message="Loading government verification details..." />
+        ) : (
+          <div>
+            {/* Header / Summary section */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                gap: 'var(--space-3)',
+                padding: 'var(--space-4)',
+                backgroundColor: 'var(--color-bg-subtle)',
+                borderRadius: 'var(--radius-sm)',
+                marginBottom: 'var(--space-4)',
+                border: '1px solid var(--color-border)',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Document Type</div>
+                <div style={{ fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-primary)', marginTop: '2px' }}>
+                  {activeVerificationDoc?.document_type === 'GST' ? 'GST Certificate' : activeVerificationDoc?.document_type === 'PAN' ? 'PAN Card' : activeVerificationDoc?.document_type}
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>AI Extraction</div>
+                <div style={{ marginTop: '2px' }}>
+                  {activeVerificationDoc?.ai_status === 'AI_COMPLETED' ? (
+                    <Badge variant="success">✓ Completed</Badge>
+                  ) : (
+                    <Badge variant="neutral">{activeVerificationDoc?.ai_status || 'Pending'}</Badge>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Government Verification</div>
+                <div style={{ marginTop: '2px' }}>
+                  {getVerificationBadge(
+                    activeVerificationDoc?.verificationData?.latest_verification?.verification_result ||
+                    activeVerificationDoc?.verification_status
+                  )}
+                </div>
+              </div>
+
+              {activeVerificationDoc?.verificationData?.latest_verification?.completed_at && (
+                <div>
+                  <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Verified At</div>
+                  <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
+                    {new Date(activeVerificationDoc.verificationData.latest_verification.completed_at).toLocaleString()}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Error or Notice alerts */}
+            {verificationError && (
+              <div
+                style={{
+                  padding: 'var(--space-3)',
+                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid var(--color-danger)',
+                  borderRadius: 'var(--radius-sm)',
+                  color: 'var(--color-danger)',
+                  fontSize: 'var(--font-size-xs)',
+                  marginBottom: 'var(--space-4)',
+                }}
+              >
+                ⚠ {verificationError}
+              </div>
+            )}
+
+            {activeVerificationDoc?.verificationData?.latest_verification?.error && (
+              <div
+                style={{
+                  padding: 'var(--space-3)',
+                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid var(--color-danger)',
+                  borderRadius: 'var(--radius-sm)',
+                  color: 'var(--color-danger)',
+                  fontSize: 'var(--font-size-xs)',
+                  marginBottom: 'var(--space-4)',
+                }}
+              >
+                ⚠ {activeVerificationDoc.verificationData.latest_verification.error}
+              </div>
+            )}
+
+            {/* Field Comparison Table */}
+            {activeVerificationDoc?.verificationData?.latest_verification?.field_results ? (
+              <div style={{ marginTop: 'var(--space-4)' }}>
+                <h4
+                  style={{
+                    fontSize: 'var(--font-size-sm)',
+                    fontWeight: 'var(--font-weight-semibold)',
+                    color: 'var(--color-text-primary)',
+                    marginBottom: 'var(--space-2)',
+                  }}
+                >
+                  Field-Level Verification Comparison
+                </h4>
+                <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+                  <table style={{ width: '100%', fontSize: 'var(--font-size-xs)', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ backgroundColor: 'var(--color-bg-subtle)', borderBottom: '1px solid var(--color-border)', textAlign: 'left' }}>
+                        <th style={{ padding: 'var(--space-2) var(--space-3)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Field</th>
+                        <th style={{ padding: 'var(--space-2) var(--space-3)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Document Value</th>
+                        <th style={{ padding: 'var(--space-2) var(--space-3)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Government Value</th>
+                        <th style={{ padding: 'var(--space-2) var(--space-3)', color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Result</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(activeVerificationDoc.verificationData.latest_verification.field_results).map(([field, res]) => (
+                        <tr key={field} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
+                          <td style={{ padding: 'var(--space-2) var(--space-3)', fontWeight: 'var(--font-weight-medium)', textTransform: 'capitalize' }}>
+                            {field.replace(/_/g, ' ')}
+                          </td>
+                          <td style={{ padding: 'var(--space-2) var(--space-3)', fontFamily: 'var(--font-family-mono)', color: 'var(--color-text-primary)' }}>
+                            {res.document_value || '—'}
+                          </td>
+                          <td style={{ padding: 'var(--space-2) var(--space-3)', fontFamily: 'var(--font-family-mono)', color: 'var(--color-text-secondary)' }}>
+                            {res.government_value || '—'}
+                          </td>
+                          <td style={{ padding: 'var(--space-2) var(--space-3)' }}>
+                            {getFieldStatusBadge(res.status)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div
+                style={{
+                  padding: 'var(--space-6)',
+                  textAlign: 'center',
+                  color: 'var(--color-text-muted)',
+                  fontSize: 'var(--font-size-sm)',
+                  backgroundColor: 'var(--color-bg-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--color-border)',
+                }}
+              >
+                {activeVerificationDoc?.verificationData?.latest_verification?.verification_result === 'NOT_FOUND' ? (
+                  <div>
+                    <div style={{ fontSize: 'var(--font-size-sm)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-warning)' }}>
+                      🔍 Record Not Found in Statutory Source
+                    </div>
+                    <p style={{ marginTop: 'var(--space-1)', fontSize: 'var(--font-size-xs)' }}>
+                      Identifier <code>{activeVerificationDoc.verificationData.latest_verification.identifier}</code> was not found in the government registry.
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    No statutory government verification performed yet. Click below to verify against the statutory provider.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
     </PageContainer>
   );
 }
+

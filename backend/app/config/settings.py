@@ -49,6 +49,15 @@ class Settings(BaseSettings):
     ocr_api_key: str = Field(default="", alias="OCR_API_KEY")
     ocr_base_url: str = Field(default="", alias="OCR_BASE_URL")
 
+    gst_provider: str = Field(default="demo", alias="GST_PROVIDER")
+    gst_api_url: str = Field(default="", alias="GST_API_URL")
+    gst_api_key: str = Field(default="", alias="GST_API_KEY")
+
+    pan_provider: str = Field(default="demo", alias="PAN_PROVIDER")
+    pan_api_url: str = Field(default="", alias="PAN_API_URL")
+    pan_api_key: str = Field(default="", alias="PAN_API_KEY")
+
+
     def model_post_init(self, __context) -> None:
         if not self.supabase_url and self.vite_supabase_url:
             self.supabase_url = self.vite_supabase_url

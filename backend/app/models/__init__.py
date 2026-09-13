@@ -6,6 +6,7 @@ from .document import Document
 from .verification_job import VerificationJob
 from .verification_result import VerificationResult
 from .audit_log import AuditLog
+from .government_verification import GovernmentVerification
 
 __all__ = [
     "Base",
@@ -16,4 +17,6 @@ __all__ = [
     "VerificationJob",
     "VerificationResult",
     "AuditLog",
+    "GovernmentVerification",
 ]
+

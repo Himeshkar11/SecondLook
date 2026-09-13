@@ -210,3 +210,46 @@ class GovernmentIntegration:
             )
 
         return self._response_from_repository_record(request, record)
+
+
+class GovernmentSourceStatus(str, Enum):
+    """Source response statuses for statutory verification queries."""
+
+    FOUND = "FOUND"
+    NOT_FOUND = "NOT_FOUND"
+    ERROR = "ERROR"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+@dataclass
+class GovernmentVerificationResponse:
+    """Normalized response shape returned by all statutory government providers."""
+
+    source: str
+    status: str  # FOUND, NOT_FOUND, ERROR, UNAVAILABLE
+    identifier: str
+    data: Dict[str, Any] = field(default_factory=dict)
+    message: Optional[str] = None
+    raw_response: Optional[Dict[str, Any]] = None
+
+
+class GovernmentProvider:
+    """Abstract base class for statutory government verification providers.
+
+    All specific adapters (GST, PAN, demo, or real API) implement this interface.
+    """
+
+    source: str = "GENERIC"
+
+    def verify(self, identifier: str, data: Optional[Dict[str, Any]] = None) -> GovernmentVerificationResponse:
+        """Verify the identifier and optional data against the government/public source.
+
+        Args:
+            identifier: The primary identifier string (e.g. GSTIN, PAN).
+            data: Optional auxiliary extracted data.
+
+        Returns:
+            GovernmentVerificationResponse normalized outcome.
+        """
+        raise NotImplementedError("GovernmentProvider subclass must implement verify(identifier, data)")
+
