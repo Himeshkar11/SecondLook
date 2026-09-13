@@ -20,6 +20,7 @@ from app.auth.service import SupabaseAuthUser
 from app.authz.dependencies import (
     require_document_access,
     require_authenticated_user,
+    require_bidder,
     require_bidder_or_officer_bidder,
     require_evaluation_access,
     require_officer,
@@ -28,6 +29,8 @@ from app.authz.dependencies import (
     require_tender_bidder_access,
 )
 from app.api.deps import get_api_request_context, get_db
+from app.models.user import User
+from app.schemas.bidder import BidderProfileResponse
 from app.services.bidder_service import BidderService
 from app.services.document_service import DocumentService
 from app.services.government_verification_service import (
@@ -505,6 +508,45 @@ def list_bidders(
             status_code=500,
             detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to load bidders", "details": {}}},
         ) from exc
+
+
+@router.get(
+    "/bidders/me",
+    response_model=BidderProfileResponse,
+    tags=["Bidders"],
+    summary="Get current authenticated bidder profile and workspace metrics",
+    responses={
+        200: {"description": "Current bidder profile and workspace counts."},
+        401: {"description": "Authentication required."},
+        403: {"description": "Forbidden for non-bidder roles."},
+        404: {"description": "Bidder profile not found."},
+        500: {"description": "Database query error."},
+    },
+)
+def get_current_bidder_profile(
+    current_user: User = Depends(require_bidder),
+    db: Session = Depends(get_db),
+):
+    """Retrieve the profile and workspace statistics for the authenticated bidder.
+
+    Identity and ownership are derived strictly from the authenticated application user,
+    preventing any cross-bidder data leakage.
+    """
+    service = BidderService(db=db)
+    try:
+        profile = service.get_bidder_profile_by_user_id(current_user.id)
+    except Exception as exc:
+        logger.error("Failed to retrieve current bidder profile: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to load bidder profile", "details": {}}},
+        ) from exc
+    if profile is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Bidder profile not found", "details": {}}},
+        )
+    return BidderProfileResponse.model_validate(profile)
 
 
 @router.get("/bidders/{id}", tags=["Bidders"], summary="Get own bidder profile", responses={

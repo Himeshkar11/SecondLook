@@ -461,3 +461,38 @@ Authentication and Security Boundary:
 FRONTEND ROUTE PROTECTION IS IMPLEMENTED FOR UX/NAVIGATION.
 
 BACKEND RBAC REMAINS THE AUTHORITATIVE SECURITY BOUNDARY.
+
+## Milestone 07 Bidder Profile + Bidder Workspace Architecture
+
+Milestone 07 implements the authenticated BIDDER product foundation and workspace experience:
+
+```text
+Login / Provisioning
+         ↓
+Authenticated Identity (Supabase Bearer Token)
+         ↓
+Application User (User.role == 'BIDDER')
+         ↓
+Backend Ownership Boundary (GET /api/v1/bidders/me)
+         ↓
+/bidder (Bidder Workspace Shell)
+  ├── Dashboard: Welcome [Company], Masked GST/PAN, real metrics
+  ├── Tenders: /bidder/tenders (Read-only tender discovery)
+  ├── My Bids: /bidder/bids (Honest M8 placeholder)
+  ├── Documents: /bidder/documents (Honest M8 placeholder)
+  ├── Compliance: /bidder/compliance (Honest M9 placeholder)
+  └── Profile: /bidder/profile (Read-only statutory credentials)
+```
+
+### Backend Ownership & Profile Security:
+- `GET /api/v1/bidders/me`: Protected by centralized `require_bidder` dependency. Determines the bidder identity solely from `current_user.id == Bidder.user_id`. Never trusts browser-supplied `bidder_id`, `user_id`, or headers.
+- Cross-Bidder Isolation: `require_owned_bidder_by_id` prevents Bidder A from accessing Bidder B's profile via `GET /api/v1/bidders/{id}` (403 Forbidden).
+- Officer Boundary: An OFFICER accessing `/api/v1/bidders/me` receives `403 Forbidden`. A BIDDER accessing officer-only endpoints (e.g. `GET /api/v1/bidders`, `GET /api/v1/tenders/{id}/bidders`, `GET /api/v1/dashboard/summary`) receives `403 Forbidden`.
+- Read-Only Statutory Profile: Statutory company attributes (Legal Name, GSTIN, PAN, CIN) are established upon registration and verified against government authorities. Self-service modification is restricted to safeguard statutory compliance integrity.
+
+### Strict Boundaries Maintained:
+- Bidder workspace foundation is implemented.
+- Actual bid submission is NOT implemented (Milestone 08).
+- Bidder document upload/processing is NOT implemented (Milestone 08).
+- Bidder compliance scoring is NOT implemented (Milestone 09).
+- Officer dashboard is NOT implemented.

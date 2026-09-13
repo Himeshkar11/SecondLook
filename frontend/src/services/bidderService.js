@@ -21,4 +21,8 @@ export async function getBidderById(id) {
   return apiClient(`/api/v1/bidders/${encodeURIComponent(id)}`);
 }
 
+export async function getCurrentBidderProfile() {
+  return apiClient('/api/v1/bidders/me');
+}
+
 export const getBidder = getBidderById;

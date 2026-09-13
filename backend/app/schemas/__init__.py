@@ -1,7 +1,7 @@
 from .user import UserCreate, UserRead
 from .auth import AuthenticatedApplicationUserRead, SignupProvisionRequest, SignupProvisionResponse
 from .tender import TenderCreate, TenderRead
-from .bidder import BidderCreate, BidderRead
+from .bidder import BidderCreate, BidderProfileResponse, BidderRead
 from .document import DocumentCreate, DocumentRead
 from .verification_job import VerificationJobCreate, VerificationJobRead
 from .verification_result import VerificationResultRead
@@ -32,6 +32,7 @@ __all__ = [
     "TenderCreate",
     "TenderRead",
     "BidderCreate",
+    "BidderProfileResponse",
     "BidderRead",
     "DocumentCreate",
     "DocumentRead",

@@ -24,7 +24,7 @@ def legacy_contract_auth_compatibility(request):
     Dedicated authorization tests opt out and exercise the real dependencies.
     This fixture never runs in production and does not weaken runtime routes.
     """
-    if request.path.name == "test_authorization_boundaries.py":
+    if request.path.name in {"test_authorization_boundaries.py", "test_bidder_workspace_foundation.py"}:
         yield
         return
 

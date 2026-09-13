@@ -1,8 +1,9 @@
-# SecondLook Milestone 06 Handoff
+# SecondLook Milestone 07 Handoff
 
 ## Exact Stopping Point
 
-Milestones 02, M3A Authentication Foundation, M3 Role-Based Signup, M4 Backend Role Enforcement, M5 Frontend Role-Based Routing + Navigation, and M6 SecondLook Landing Page + 3D Experience are complete. The public landing page, SecondLook product narrative, 5-step deterministic workflow, evidence chain architecture, AI+Human control principles, role signup CTAs, and lightweight code-split 3D hero visualization are implemented. Bidder profile and bidder workspace belong to Milestone 07.
+Milestones 02, M3A Authentication Foundation, M3 Role-Based Signup, M4 Backend Role Enforcement, M5 Frontend Role-Based Routing + Navigation, M6 SecondLook Landing Page + 3D Experience, and M7 Bidder Profile + Bidder Workspace are complete. The authenticated bidder workspace shell, verified read-only bidder profile, masked identifier summary, read-only tender discovery, honest placeholder empty states for M8/M9, and secure `GET /api/v1/bidders/me` backend endpoint are implemented and verified. Bid submission and document upload workflows belong to Milestone 08.
+
 
 The investigation and executed resolution are documented in [docs/M2_BLOCKER_ANALYSIS.md](M2_BLOCKER_ANALYSIS.md). The local rollback snapshot is `m2_reconciliation_snapshot.json` and is intentionally uncommitted.
 
@@ -353,15 +354,40 @@ AUTHENTICATION/RBAC NOT REDESIGNED.
 
 BACKEND RBAC REMAINS THE AUTHORITATIVE SECURITY BOUNDARY.
 
-BIDDER DASHBOARD NOT IMPLEMENTED.
+## M7 Bidder Profile + Bidder Workspace Foundation
 
-OFFICER DASHBOARD NOT IMPLEMENTED.
+The authenticated bidder experience is implemented:
+- `GET /api/v1/bidders/me`: Secure backend profile and metric endpoint enforcing canonical `BIDDER` role and resolving identity strictly from the authenticated application user (`current_user.id == Bidder.user_id`).
+- Profile & Ownership Security: Cross-bidder access denied via `require_owned_bidder_by_id` (403 Forbidden). Officer access to bidder profile endpoints denied (403 Forbidden). Bidder access to officer endpoints denied (403 Forbidden).
+- Read-Only Statutory Profile: Legal Name, GSTIN, PAN, and CIN are established upon registration and verified against government authorities. Self-service mutation is restricted to preserve compliance audit integrity.
+- Bidder Workspace (`/bidder`): Welcome company greeting, account summary with masked statutory identifiers (`29******Z5`, `AA*****1A`), real metric counts (`active_tenders_count`, `documents_count`, `submitted_bids_count = 0`), and module navigation.
+- Bidder Profile Page (`/bidder/profile`): Displays verified corporate attributes with reveal/mask toggle and statutory integrity notice.
+- Bidder Tender Discovery (`/bidder/tenders`): Read-only discovery of published procurement tenders using existing `GET /api/v1/tenders` and `GET /api/v1/tenders/{id}`, with detailed inspection modal and M8 bid submission notices.
+- Honest Placeholder States:
+  - My Bids (`/bidder/bids`): Clear milestone notice that bid submission opens in Milestone 08.
+  - Bidder Documents (`/bidder/documents`): Clear milestone notice that document upload opens in Milestone 08.
+  - Compliance (`/bidder/compliance`): Clear milestone notice that compliance evaluation opens in Milestone 09.
+- Frontend API Client: Transparently attaches `Bearer ${token}` from Supabase Auth session for authenticated API calls.
 
-MILESTONE 07 NOT STARTED.
+Focused M7 tests: `7 passed`.
+Full backend regression: `397 passed, 1 warning`.
+Frontend build: `npm run build` passed.
+
+BIDDER WORKSPACE FOUNDATION IS IMPLEMENTED.
+
+ACTUAL BID SUBMISSION IS NOT IMPLEMENTED.
+
+BIDDER DOCUMENT UPLOAD/PROCESSING IS NOT IMPLEMENTED.
+
+BIDDER COMPLIANCE SCORING IS NOT IMPLEMENTED.
+
+OFFICER DASHBOARD IS NOT IMPLEMENTED.
+
+MILESTONE 08 NOT STARTED.
 
 ## Next Milestone Instructions
 
-Milestone 07 is **Bidder Profile + Bidder Workspace**.
+Milestone 08 is **Bid Submission + Bidder Document Workflow**.
 
 AUTHENTICATION IS IMPLEMENTED.
 
@@ -373,4 +399,6 @@ FRONTEND ROLE-BASED ROUTING IS IMPLEMENTED.
 
 LANDING PAGE + 3D EXPERIENCE IS IMPLEMENTED.
 
-Milestone 07 will implement the bidder profile and bidder workspace foundations under `frontend/src/pages/bidder/`.
+BIDDER WORKSPACE FOUNDATION IS IMPLEMENTED.
+
+Milestone 08 will implement the actual bid submission data model, bidder document upload and OCR processing pipelines, and submission tracking.

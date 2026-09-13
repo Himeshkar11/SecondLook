@@ -3,6 +3,8 @@
  * Centralized API client for communicating with the FastAPI backend.
  */
 
+import { supabase } from '../auth/supabaseClient.js';
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 export async function apiClient(endpoint, options = {}) {
@@ -16,10 +18,25 @@ export async function apiClient(endpoint, options = {}) {
     defaultHeaders['Content-Type'] = 'application/json';
   }
 
+  // Transparently attach Supabase Auth session token if available and not explicitly provided
+  const authHeaders = {};
+  if (!options.headers?.Authorization && supabase) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      if (token) {
+        authHeaders['Authorization'] = `Bearer ${token}`;
+      }
+    } catch {
+      // Proceed without token if session lookup fails
+    }
+  }
+
   const config = {
     ...options,
     headers: {
       ...defaultHeaders,
+      ...authHeaders,
       ...options.headers,
     },
   };

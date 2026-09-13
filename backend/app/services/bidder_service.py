@@ -211,3 +211,58 @@ class BidderService:
         finally:
             if should_close and session is not None:
                 session.close()
+
+    def get_bidder_profile_by_user_id(self, user_id: uuid.UUID) -> Dict[str, Any] | None:
+        """Return the authenticated bidder's profile and workspace metrics."""
+        session = self.db
+        should_close = False
+        if session is None and SessionLocal is not None:
+            session = SessionLocal()
+            should_close = True
+
+        if session is None:
+            return None
+
+        try:
+            stmt = select(Bidder).options(
+                joinedload(Bidder.tenders),
+                joinedload(Bidder.documents),
+                joinedload(Bidder.user),
+            ).where(Bidder.user_id == user_id)
+
+            b = session.execute(stmt).scalars().first()
+            if b is None:
+                return None
+
+            user_obj = getattr(b, "user", None)
+            email = user_obj.email if user_obj else ""
+            full_name = user_obj.full_name if user_obj else b.legal_name
+            role = user_obj.role if user_obj else "BIDDER"
+
+            active_tenders_count = len(b.tenders) if b.tenders else 0
+            documents_count = len(b.documents) if b.documents else 0
+            submitted_bids_count = 0
+
+            return {
+                "id": b.id,
+                "user_id": b.user_id,
+                "legal_name": b.legal_name,
+                "registration_number": b.registration_number,
+                "gst_number": b.gst_number,
+                "pan_number": b.pan_number,
+                "status": (b.status or "PENDING").upper(),
+                "email": email,
+                "full_name": full_name,
+                "role": role,
+                "active_tenders_count": active_tenders_count,
+                "submitted_bids_count": submitted_bids_count,
+                "documents_count": documents_count,
+                "created_at": b.created_at.isoformat() if b.created_at else None,
+                "updated_at": b.updated_at.isoformat() if b.updated_at else None,
+            }
+        except Exception as exc:
+            logger.error("Failed to retrieve bidder profile for user %s: %s", user_id, exc)
+            raise
+        finally:
+            if should_close and session is not None:
+                session.close()

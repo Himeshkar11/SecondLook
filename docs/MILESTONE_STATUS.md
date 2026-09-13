@@ -1,7 +1,8 @@
 # SecondLook Milestone Status
 
-Current Milestone: 06 — Landing Page + 3D Experience
+Current Milestone: 07 — Bidder Profile + Bidder Workspace
 Status: COMPLETED
+
 
 ## What Was Inspected
 
@@ -45,9 +46,15 @@ Status: COMPLETED
 - `backend/app/authz/dependencies.py`
 - `backend/tests/test_authorization_boundaries.py`
 - `backend/tests/conftest.py`
-- `frontend/src/pages/SignupPage.jsx`
 - `frontend/src/auth/ProtectedRoute.jsx`
 - `frontend/src/pages/bidder/BidderWorkspacePage.jsx`
+- `frontend/src/components/landing/Hero3D.jsx`
+- `frontend/src/components/landing/PublicNavbar.jsx`
+- `frontend/src/pages/LandingPage.jsx`
+- `backend/tests/test_bidder_workspace_foundation.py`
+- `frontend/src/pages/bidder/BidderProfilePage.jsx`
+- `frontend/src/pages/bidder/BidderTendersPage.jsx`
+- `frontend/src/pages/bidder/BidderPlaceholderPage.jsx`
 
 ## Files Modified
 
@@ -75,6 +82,12 @@ Status: COMPLETED
 - `docs/MILESTONE_STATUS.md`
 - `docs/HANDOFF.md`
 - `docs/M2_BLOCKER_ANALYSIS.md`
+- `backend/app/schemas/bidder.py`
+- `backend/app/services/bidder_service.py`
+- `frontend/src/api/client.js`
+- `frontend/src/services/bidderService.js`
+- `frontend/src/pages/bidder/BidderWorkspacePage.jsx`
+
 
 ## Tests / Checks
 
@@ -273,26 +286,49 @@ AUTHENTICATION/RBAC NOT REDESIGNED.
 
 BACKEND RBAC REMAINS THE AUTHORITATIVE SECURITY BOUNDARY.
 
-BIDDER DASHBOARD NOT IMPLEMENTED.
+## M7 — Bidder Profile + Bidder Workspace Foundation
 
-OFFICER DASHBOARD NOT IMPLEMENTED.
+Milestone 07 implements the authenticated BIDDER product foundation:
 
-MILESTONE 07 NOT STARTED.
+- `GET /api/v1/bidders/me`: Secure backend profile endpoint protected by `require_bidder`. Resolves profile strictly from the authenticated application user (`current_user.id == Bidder.user_id`).
+- Profile & Ownership Security: Cross-bidder access denied via `require_owned_bidder_by_id` (403 Forbidden). Officer access to bidder profile endpoints denied (403 Forbidden). Bidder access to officer endpoints denied (403 Forbidden).
+- Read-Only Statutory Profile: Statutory company attributes (Legal Name, GSTIN, PAN, CIN) are established at registration and verified against government authorities. Self-service modification is restricted to preserve compliance audit integrity.
+- Bidder Workspace (`/bidder`): Welcome company greeting, account summary with masked statutory identifiers (`29******Z5`, `AA*****1A`), real metric counts (`active_tenders_count`, `documents_count`, `submitted_bids_count = 0`), and module navigation.
+- Bidder Profile Page (`/bidder/profile`): Displays verified corporate attributes with reveal/mask toggle and statutory integrity notice.
+- Bidder Tender Discovery (`/bidder/tenders`): Read-only discovery of published procurement tenders using existing `GET /api/v1/tenders` and `GET /api/v1/tenders/{id}`, with detailed inspection modal and M8 bid submission notices.
+- Honest Placeholder States:
+  - My Bids (`/bidder/bids`): Clear milestone notice that bid submission opens in Milestone 08.
+  - Bidder Documents (`/bidder/documents`): Clear milestone notice that document upload opens in Milestone 08.
+  - Compliance (`/bidder/compliance`): Clear milestone notice that compliance evaluation opens in Milestone 09.
+- Frontend API Client: Transparently attaches `Bearer ${token}` from Supabase Auth session for authenticated API calls.
+
+Focused M7 tests: `7 passed`.
+Full backend regression: `397 passed, 1 warning`.
+Frontend build: `npm run build` passed.
+
+BIDDER WORKSPACE FOUNDATION IS IMPLEMENTED.
+
+ACTUAL BID SUBMISSION IS NOT IMPLEMENTED.
+
+BIDDER DOCUMENT UPLOAD/PROCESSING IS NOT IMPLEMENTED.
+
+BIDDER COMPLIANCE SCORING IS NOT IMPLEMENTED.
+
+OFFICER DASHBOARD IS NOT IMPLEMENTED.
+
+MILESTONE 08 NOT STARTED.
 
 ## Next Milestone
 
-Milestone 07 — Bidder Profile + Bidder Workspace
+Milestone 08 — Bid Submission + Bidder Document Workflow
 
 ## STRICT DO NOT
 
-- implement bidder dashboards
-- implement officer dashboards
-- modify compliance
-- modify OCR
-- modify AI
-- modify government verification
-- modify evidence
-- modify officer review
-- modify workers
-- modify historical migrations
-- start Milestone 07 before review
+- implement actual bid upload
+- implement bid submission
+- implement bidder document processing workflow
+- implement bidder OCR workflow
+- implement bidder AI extraction
+- implement bidder compliance scoring
+- implement officer dashboard
+- start Milestone 08 before review

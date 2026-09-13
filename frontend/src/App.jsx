@@ -19,6 +19,9 @@ import TenderWorkflowPage from './pages/TenderWorkflowPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import SignupPage from './pages/SignupPage.jsx';
 import BidderWorkspacePage from './pages/bidder/BidderWorkspacePage.jsx';
+import BidderProfilePage from './pages/bidder/BidderProfilePage.jsx';
+import BidderTendersPage from './pages/bidder/BidderTendersPage.jsx';
+import BidderPlaceholderPage from './pages/bidder/BidderPlaceholderPage.jsx';
 
 const LandingPage = React.lazy(() => import('./pages/LandingPage.jsx'));
 
@@ -96,51 +99,11 @@ export default function App() {
         {/* BIDDER Protected Workspace & Namespaced Routes */}
         <Route element={<ProtectedRoute allowedRoles={['BIDDER']} />}>
           <Route path="/bidder" element={<BidderWorkspacePage />} />
-          <Route
-            path="/bidder/tenders"
-            element={
-              <PlaceholderPage
-                title="Available Tenders"
-                description="Browse published tenders open for bidding."
-              />
-            }
-          />
-          <Route
-            path="/bidder/bids"
-            element={
-              <PlaceholderPage
-                title="My Bids"
-                description="Track submitted bids and bid participation status."
-              />
-            }
-          />
-          <Route
-            path="/bidder/compliance"
-            element={
-              <PlaceholderPage
-                title="Bidder Compliance"
-                description="Statutory compliance evaluations and evidence documentation."
-              />
-            }
-          />
-          <Route
-            path="/bidder/documents"
-            element={
-              <PlaceholderPage
-                title="Bidder Documents"
-                description="Upload and manage business verification documents."
-              />
-            }
-          />
-          <Route
-            path="/bidder/profile"
-            element={
-              <PlaceholderPage
-                title="Bidder Profile"
-                description="Organization details, GSTIN, PAN, and registration numbers."
-              />
-            }
-          />
+          <Route path="/bidder/tenders" element={<BidderTendersPage />} />
+          <Route path="/bidder/bids" element={<BidderPlaceholderPage type="bids" />} />
+          <Route path="/bidder/compliance" element={<BidderPlaceholderPage type="compliance" />} />
+          <Route path="/bidder/documents" element={<BidderPlaceholderPage type="documents" />} />
+          <Route path="/bidder/profile" element={<BidderProfilePage />} />
         </Route>
 
         {/* OFFICER Protected Workspace & Namespaced Routes */}
