@@ -6,13 +6,36 @@ providers and must not make network calls, handle credentials, or run
 real verification workflows.
 """
 
-from app.integrations.base import GovernmentIntegration, IntegrationRequest, IntegrationResponse, IntegrationStatus
-from app.integrations.registry import get_integration
+from app.integrations.base import (
+    GovernmentIntegration,
+    GovernmentProvider,
+    GovernmentSourceStatus,
+    GovernmentVerificationResponse,
+    IntegrationRequest,
+    IntegrationResponse,
+    IntegrationStatus,
+    ProviderCapabilities,
+)
+from app.integrations.registry import (
+    GovernmentProviderRegistry,
+    get_government_provider,
+    get_integration,
+    get_provider,
+    government_provider_registry,
+)
 
 __all__ = [
     "GovernmentIntegration",
+    "GovernmentProvider",
+    "GovernmentSourceStatus",
+    "GovernmentVerificationResponse",
     "IntegrationRequest",
     "IntegrationResponse",
     "IntegrationStatus",
+    "ProviderCapabilities",
+    "GovernmentProviderRegistry",
+    "government_provider_registry",
     "get_integration",
+    "get_provider",
+    "get_government_provider",
 ]

@@ -70,26 +70,103 @@ def get_integration(provider: str) -> GovernmentIntegration:
     return provider_cls()
 
 
+class GovernmentProviderRegistry:
+    """Centralized registry for statutory and demonstration government verification providers (Task 14)."""
+
+    def __init__(self) -> None:
+        pass
+
+    def get(self, source: str) -> GovernmentProvider:
+        """Resolve and instantiate the configured provider for a given source."""
+        from app.config.settings import settings
+        from app.integrations.blacklist import DemoBlacklistProvider
+        from app.integrations.epfo import DemoEPFOProvider
+        from app.integrations.esic import DemoESICProvider
+        from app.integrations.gst import DemoGSTProvider, GSTProvider
+        from app.integrations.make_in_india import DemoMakeInIndiaProvider
+        from app.integrations.nsic import DemoNSICProvider
+        from app.integrations.oem import DemoOEMProvider
+        from app.integrations.pan import DemoPANProvider, PANProvider
+        from app.integrations.startup_india import DemoStartupIndiaProvider
+        from app.integrations.udyam import DemoUdyamProvider
+
+        key = (source or "").strip().upper()
+
+        if key == "GST":
+            if (settings.gst_provider or "demo").lower() == "demo":
+                return DemoGSTProvider()
+            return GSTProvider()
+
+        if key == "PAN":
+            if (settings.pan_provider or "demo").lower() == "demo":
+                return DemoPANProvider()
+            return PANProvider()
+
+        if key in ("UDYAM", "MSME"):
+            return DemoUdyamProvider()
+
+        if key == "EPFO":
+            return DemoEPFOProvider()
+
+        if key == "ESIC":
+            return DemoESICProvider()
+
+        if key in ("STARTUP_INDIA", "STARTUPINDIA", "DPIIT"):
+            return DemoStartupIndiaProvider()
+
+        if key == "NSIC":
+            return DemoNSICProvider()
+
+        if key in ("MAKE_IN_INDIA", "MAKEININDIA", "MII"):
+            return DemoMakeInIndiaProvider()
+
+        if key == "OEM":
+            return DemoOEMProvider()
+
+        if key in ("BLACKLIST", "BLACKLISTING", "DEBARMENT"):
+            return DemoBlacklistProvider()
+
+        raise ValueError(
+            f"Unknown or unsupported government verification source: '{source}'. "
+            f"Supported sources: {self.available()}"
+        )
+
+    @classmethod
+    def list_providers(cls) -> list[str]:
+        """Classmethod returning all supported statutory and registry sources."""
+        return [
+            "BLACKLIST",
+            "EPFO",
+            "ESIC",
+            "GST",
+            "MAKE_IN_INDIA",
+            "NSIC",
+            "OEM",
+            "PAN",
+            "STARTUP_INDIA",
+            "UDYAM",
+        ]
+
+    def available(self) -> list[str]:
+        """List all supported statutory and registry sources."""
+        return self.list_providers()
+
+
+government_provider_registry = GovernmentProviderRegistry()
+
+
+def get_provider(source: str) -> GovernmentProvider:
+    """Canonical factory helper for retrieving a statutory/registry provider (Task 14)."""
+    return government_provider_registry.get(source)
+
+
 def get_government_provider(source: str) -> GovernmentProvider:
-    """Factory helper for statutory GovernmentProvider instances (Task 10).
-
-    Supports:
-        GST -> GSTProvider / DemoGSTProvider
-        PAN -> PANProvider / DemoPANProvider
-    """
-    from app.config.settings import settings
-    from app.integrations.gst import DemoGSTProvider, GSTProvider
-    from app.integrations.pan import DemoPANProvider, PANProvider
-
-    normalized = (source or "").strip().upper()
-    if normalized == "GST":
-        if (settings.gst_provider or "demo").lower() == "demo":
-            return DemoGSTProvider()
-        return GSTProvider()
-    elif normalized == "PAN":
-        if (settings.pan_provider or "demo").lower() == "demo":
-            return DemoPANProvider()
-        return PANProvider()
-    else:
-        raise ValueError(f"Unsupported statutory verification source: '{source}'. Only GST and PAN are supported in Task 10.")
-
+    """Backward-compatible statutory provider helper from Task 10 (GST & PAN only)."""
+    key = (source or "").strip().upper()
+    if key not in ("GST", "PAN"):
+        raise ValueError(
+            f"Unsupported statutory verification source: '{source}'. "
+            f"Task 10 statutory document verification only supports GST and PAN. "
+            f"Use get_provider('{source}') for multi-source verification."
+        )
+    return get_provider(source)

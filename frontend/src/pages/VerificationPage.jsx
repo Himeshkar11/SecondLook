@@ -33,6 +33,7 @@ export default function VerificationPage() {
   const [pageState, setPageState] = useState(STATE.SELECT);
   const [completedSteps, setCompletedSteps] = useState([]);
   const [officerDecision, setOfficerDecision] = useState(null); // null | 'APPROVED' | 'REJECTED' | 'CLARIFICATION'
+  const [inspectingSource, setInspectingSource] = useState(null); // null | object
   const intervalRef = useRef(null);
 
   const allBidders = getAllBidders();
@@ -439,7 +440,7 @@ export default function VerificationPage() {
         </div>
       </div>
 
-      {/* Evidence Sources */}
+      {/* Evidence Sources (Task 14 Multi-Source Government Verification) */}
       <div
         style={{
           backgroundColor: 'var(--color-bg-card)',
@@ -450,12 +451,17 @@ export default function VerificationPage() {
         }}
       >
         <div style={{ padding: 'var(--space-4) var(--space-5)', borderBottom: '1px solid var(--color-border)' }}>
-          <h2 style={{ fontSize: 'var(--font-size-base)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-primary)' }}>
-            Evidence Sources
-          </h2>
-          <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-            Government registries and portals queried during verification
-          </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+            <div>
+              <h2 style={{ fontSize: 'var(--font-size-base)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-primary)' }}>
+                Statutory Evidence Sources (Multi-Source Verification)
+              </h2>
+              <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                Normalized statutory verification adapters across 10 central registries. All sources operating in deterministic DEMO mode.
+              </p>
+            </div>
+            <Badge variant="neutral">Task 14 Multi-Source</Badge>
+          </div>
         </div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', fontSize: 'var(--font-size-sm)' }}>
@@ -471,26 +477,62 @@ export default function VerificationPage() {
                 }}
               >
                 <th style={{ padding: 'var(--space-3) var(--space-5)' }}>Registry / Source</th>
+                <th style={{ padding: 'var(--space-3) var(--space-3)', textAlign: 'center' }}>Mode</th>
+                <th style={{ padding: 'var(--space-3) var(--space-4)' }}>Identifier / Entity</th>
                 <th style={{ padding: 'var(--space-3) var(--space-4)' }}>Status</th>
-                <th style={{ padding: 'var(--space-3) var(--space-5)', textAlign: 'right' }}>Response Time</th>
+                <th style={{ padding: 'var(--space-3) var(--space-4)', textAlign: 'right' }}>Response Time</th>
+                <th style={{ padding: 'var(--space-3) var(--space-5)', textAlign: 'center' }}>Action</th>
               </tr>
             </thead>
             <tbody>
               {result.evidenceSources.map((src, index) => (
                 <tr
-                  key={src.source}
+                  key={src.code || src.source}
                   style={{
                     borderBottom: index === result.evidenceSources.length - 1 ? 'none' : '1px solid var(--color-border-subtle)',
                   }}
                 >
                   <td style={{ padding: 'var(--space-3) var(--space-5)', fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)', fontSize: 'var(--font-size-sm)' }}>
-                    {src.source}
+                    <div>{src.source}</div>
+                    {src.provider && (
+                      <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', fontFamily: 'var(--font-family-mono)', marginTop: '2px' }}>
+                        {src.provider}
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ padding: 'var(--space-3) var(--space-3)', textAlign: 'center' }}>
+                    <span
+                      style={{
+                        fontSize: '10px',
+                        fontWeight: 'var(--font-weight-bold)',
+                        letterSpacing: '0.06em',
+                        padding: '2px 6px',
+                        borderRadius: 'var(--radius-xs)',
+                        backgroundColor: 'var(--color-primary-subtle)',
+                        color: 'var(--color-primary)',
+                        border: '1px solid var(--color-primary)',
+                      }}
+                    >
+                      DEMO
+                    </span>
+                  </td>
+                  <td style={{ padding: 'var(--space-3) var(--space-4)', fontFamily: 'var(--font-family-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+                    {src.identifier || '—'}
                   </td>
                   <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
                     {getSourceStatusBadge(src.status)}
                   </td>
-                  <td style={{ padding: 'var(--space-3) var(--space-5)', textAlign: 'right', fontFamily: 'var(--font-family-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+                  <td style={{ padding: 'var(--space-3) var(--space-4)', textAlign: 'right', fontFamily: 'var(--font-family-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
                     {src.responseTime}
+                  </td>
+                  <td style={{ padding: 'var(--space-3) var(--space-5)', textAlign: 'center' }}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setInspectingSource(src)}
+                    >
+                      Inspect
+                    </Button>
                   </td>
                 </tr>
               ))}
@@ -498,6 +540,108 @@ export default function VerificationPage() {
           </table>
         </div>
       </div>
+
+      {/* Verification Data Inspection Modal */}
+      {inspectingSource && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 'var(--space-4)',
+          }}
+          onClick={() => setInspectingSource(null)}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--color-bg-card)',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid var(--color-border)',
+              maxWidth: '560px',
+              width: '100%',
+              padding: 'var(--space-5)',
+              boxShadow: 'var(--shadow-lg)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-4)' }}>
+              <div>
+                <h3 style={{ fontSize: 'var(--font-size-base)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-primary)' }}>
+                  {inspectingSource.source}
+                </h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginTop: 'var(--space-1)' }}>
+                  <span style={{ fontSize: '10px', fontWeight: 'bold', padding: '1px 5px', borderRadius: '3px', backgroundColor: 'var(--color-primary-subtle)', color: 'var(--color-primary)', border: '1px solid var(--color-primary)' }}>
+                    DEMO PROVIDER
+                  </span>
+                  <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', fontFamily: 'var(--font-family-mono)' }}>
+                    {inspectingSource.provider || 'Demo Provider'}
+                  </span>
+                </div>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setInspectingSource(null)}>
+                ✕
+              </Button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)', marginBottom: 'var(--space-4)', fontSize: 'var(--font-size-xs)' }}>
+              <div>
+                <div style={{ color: 'var(--color-text-muted)' }}>Identifier Queried</div>
+                <div style={{ fontWeight: 'var(--font-weight-semibold)', fontFamily: 'var(--font-family-mono)', color: 'var(--color-text-primary)' }}>
+                  {inspectingSource.identifier || 'N/A'}
+                </div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--color-text-muted)' }}>Verification Status</div>
+                <div>{getSourceStatusBadge(inspectingSource.status)}</div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--color-text-muted)' }}>Retrieved Timestamp</div>
+                <div style={{ fontFamily: 'var(--font-family-mono)', color: 'var(--color-text-secondary)' }}>
+                  {inspectingSource.retrievedAt || new Date().toISOString()}
+                </div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--color-text-muted)' }}>Mode</div>
+                <div style={{ color: 'var(--color-text-secondary)' }}>Offline Synthetic Record</div>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 'var(--space-4)' }}>
+              <div style={{ fontSize: 'var(--font-size-xs)', fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-1)' }}>
+                Normalized Statutory Payload:
+              </div>
+              <pre
+                style={{
+                  backgroundColor: 'var(--color-bg-page)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: 'var(--space-3)',
+                  fontSize: 'var(--font-size-xs)',
+                  fontFamily: 'var(--font-family-mono)',
+                  color: 'var(--color-text-primary)',
+                  overflowX: 'auto',
+                  maxHeight: '180px',
+                  margin: 0,
+                }}
+              >
+                {JSON.stringify(inspectingSource.data || { status: inspectingSource.status, source: inspectingSource.source }, null, 2)}
+              </pre>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Button variant="secondary" size="sm" onClick={() => setInspectingSource(null)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Officer Decision — Demo Only */}
       <div

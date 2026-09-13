@@ -129,6 +129,10 @@ class EvidenceResolver:
         gvs_by_source: Dict[str, GovernmentVerification] = {}
         for gv in verifications:
             src = gv.source.strip().upper()
+            if src in ("BLACKLISTING", "DEBARMENT"):
+                src = "BLACKLIST"
+            elif src == "MSME":
+                src = "UDYAM"
             if src not in gvs_by_source:
                 gvs_by_source[src] = gv
 
@@ -151,7 +155,7 @@ class EvidenceResolver:
             if gv is not None:
                 is_verified = (
                     gv.status == "COMPLETED"
-                    and gv.verification_result in ["MATCH", "VERIFIED"]
+                    and gv.verification_result in ["MATCH", "VERIFIED", "CLEAR", "LISTED"]
                 )
                 gov_data = dict(gv.government_data or {})
                 identifier = gv.identifier or ai_data.get("gstin") or ai_data.get("pan") or ai_data.get("document_number")

@@ -83,6 +83,8 @@ class ComplianceEngine:
         "FIELD_EXISTS",
         "FIELD_NOT_EMPTY",
         "IDENTIFIER_MATCH",
+        "FIELD_GREATER_THAN_OR_EQUAL",
+        "GREATER_THAN_OR_EQUAL",
     }
 
     @staticmethod
@@ -97,7 +99,7 @@ class ComplianceEngine:
         {
             "source": "GST",
             "field": "status",
-            "operator": "STATUS_EQUALS",  # or EQUALS, FIELD_EQUALS, FIELD_EXISTS, FIELD_NOT_EMPTY, IDENTIFIER_MATCH
+            "operator": "STATUS_EQUALS",  # or EQUALS, FIELD_EQUALS, FIELD_EXISTS, FIELD_NOT_EMPTY, IDENTIFIER_MATCH, FIELD_GREATER_THAN_OR_EQUAL
             "expected_value": "ACTIVE"
         }
         """
@@ -110,6 +112,8 @@ class ComplianceEngine:
         operator = raw_operator
         if operator in ("STATUS_EQUALS", "FIELD_EQUALS"):
             operator = "EQUALS"
+        elif operator == "FIELD_GREATER_THAN_OR_EQUAL":
+            operator = "GREATER_THAN_OR_EQUAL"
 
         # Find matching evidence for this source
         matching_evidence = [e for e in evidence_list if e.source.upper() == source]
@@ -291,6 +295,61 @@ class ComplianceEngine:
                 f"Field '{target_field}' matches required value '{expected}' (actual: '{val}')."
                 if passed
                 else f"Field '{target_field}' expected '{expected}', but verified evidence is '{val}'."
+            )
+            return RuleResult(
+                rule_index=rule_index,
+                field=target_field,
+                operator=raw_operator,
+                expected=expected,
+                actual=val,
+                passed=passed,
+                status=status,
+                reason=reason,
+            )
+
+        # ------------------------------------------------------------------
+        # 5. GREATER_THAN_OR_EQUAL / FIELD_GREATER_THAN_OR_EQUAL
+        # Numeric comparison: actual >= expected -> PASS, actual < expected -> FAIL
+        # Missing/unparseable -> NOT_VERIFIED
+        # ------------------------------------------------------------------
+        if operator == "GREATER_THAN_OR_EQUAL":
+            if target_field not in data or data.get(target_field) is None:
+                return RuleResult(
+                    rule_index=rule_index,
+                    field=target_field,
+                    operator=raw_operator,
+                    expected=expected,
+                    actual=None,
+                    passed=False,
+                    status="NOT_VERIFIED",
+                    reason=f"Field '{target_field}' is unavailable in verified {source} record.",
+                )
+
+            val = data.get(target_field)
+            try:
+                # Handle numeric strings or floats (e.g. "65%", "65.0", 65)
+                clean_val_str = str(val).rstrip("%").strip()
+                clean_exp_str = str(expected).rstrip("%").strip()
+                actual_num = float(clean_val_str)
+                expected_num = float(clean_exp_str)
+            except (ValueError, TypeError):
+                return RuleResult(
+                    rule_index=rule_index,
+                    field=target_field,
+                    operator=raw_operator,
+                    expected=expected,
+                    actual=val,
+                    passed=False,
+                    status="NOT_VERIFIED",
+                    reason=f"Field '{target_field}' value '{val}' or expected '{expected}' is not a valid number.",
+                )
+
+            passed = actual_num >= expected_num
+            status = "PASS" if passed else "FAIL"
+            reason = (
+                f"Field '{target_field}' ({actual_num}) meets required minimum threshold ({expected_num})."
+                if passed
+                else f"Field '{target_field}' ({actual_num}) is below required minimum threshold ({expected_num})."
             )
             return RuleResult(
                 rule_index=rule_index,

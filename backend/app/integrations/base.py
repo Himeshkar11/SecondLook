@@ -222,6 +222,32 @@ class GovernmentSourceStatus(str, Enum):
 
 
 @dataclass
+class ProviderCapabilities:
+    """Normalized capabilities exposed by each government/statutory provider."""
+
+    source: str
+    identifier_type: str
+    supported_fields: list[str] = field(default_factory=list)
+    is_demo: bool = True
+    supports_lookup: bool = True
+    supported_identifiers: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.supported_identifiers and self.identifier_type:
+            self.supported_identifiers = [self.identifier_type]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "source": self.source,
+            "identifier_type": self.identifier_type,
+            "supported_fields": self.supported_fields,
+            "is_demo": self.is_demo,
+            "supports_lookup": self.supports_lookup,
+            "supported_identifiers": self.supported_identifiers,
+        }
+
+
+@dataclass
 class GovernmentVerificationResponse:
     """Normalized response shape returned by all statutory government providers."""
 
@@ -231,6 +257,21 @@ class GovernmentVerificationResponse:
     data: Dict[str, Any] = field(default_factory=dict)
     message: Optional[str] = None
     raw_response: Optional[Dict[str, Any]] = None
+    provider: str = "demo"
+    is_demo: bool = True
+    retrieved_at: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "source": self.source,
+            "status": self.status,
+            "identifier": self.identifier,
+            "data": self.data,
+            "message": self.message,
+            "provider": self.provider,
+            "is_demo": self.is_demo,
+            "retrieved_at": self.retrieved_at,
+        }
 
 
 class GovernmentProvider:
@@ -240,6 +281,17 @@ class GovernmentProvider:
     """
 
     source: str = "GENERIC"
+    capabilities: Optional[ProviderCapabilities] = None
+
+    def get_capabilities(self) -> ProviderCapabilities:
+        """Return declared provider capabilities."""
+        return self.capabilities or ProviderCapabilities(
+            source=self.source,
+            identifier_type="IDENTIFIER",
+            supported_fields=list(self.__dict__.get("supported_fields", [])),
+            is_demo=True,
+            supports_lookup=True,
+        )
 
     def verify(self, identifier: str, data: Optional[Dict[str, Any]] = None) -> GovernmentVerificationResponse:
         """Verify the identifier and optional data against the government/public source.

@@ -57,6 +57,15 @@ class Settings(BaseSettings):
     pan_api_url: str = Field(default="", alias="PAN_API_URL")
     pan_api_key: str = Field(default="", alias="PAN_API_KEY")
 
+    udyam_provider: str = Field(default="demo", alias="UDYAM_PROVIDER")
+    epfo_provider: str = Field(default="demo", alias="EPFO_PROVIDER")
+    esic_provider: str = Field(default="demo", alias="ESIC_PROVIDER")
+    startup_india_provider: str = Field(default="demo", alias="STARTUP_INDIA_PROVIDER")
+    nsic_provider: str = Field(default="demo", alias="NSIC_PROVIDER")
+    make_in_india_provider: str = Field(default="demo", alias="MAKE_IN_INDIA_PROVIDER")
+    oem_provider: str = Field(default="demo", alias="OEM_PROVIDER")
+    blacklist_provider: str = Field(default="demo", alias="BLACKLIST_PROVIDER")
+
 
     def model_post_init(self, __context) -> None:
         if not self.supabase_url and self.vite_supabase_url:
