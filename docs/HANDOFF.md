@@ -1,8 +1,8 @@
-# SecondLook Milestone 04 Handoff
+# SecondLook Milestone 05 Handoff
 
 ## Exact Stopping Point
 
-Milestones 02, M3A Authentication Foundation, M3 Role-Based Signup, and M4 Backend Role Enforcement are complete. Supabase Auth login, session restoration, logout, backend identity resolution, explicit role selection, role-specific profile creation, centralized role enforcement, and selected ownership boundaries are implemented. Frontend route guards, dashboards, landing redesign, and bid submission remain out of scope.
+Milestones 02, M3A Authentication Foundation, M3 Role-Based Signup, M4 Backend Role Enforcement, and M5 Frontend Role-Based Routing + Navigation are complete. Supabase Auth login, session restoration, logout, backend identity resolution, explicit role selection, role-specific profile creation, centralized role enforcement, ownership boundaries, centralized ProtectedRoute frontend route protection, and role-aware navigation are implemented. Landing redesign and 3D visual experience belong to Milestone 06.
 
 The investigation and executed resolution are documented in [docs/M2_BLOCKER_ANALYSIS.md](M2_BLOCKER_ANALYSIS.md). The local rollback snapshot is `m2_reconciliation_snapshot.json` and is intentionally uncommitted.
 
@@ -309,9 +309,26 @@ M4 focused security tests: `22 passed`. Full backend regression: `390 passed, 1 
 
 All sensitive legacy surfaces are now protected. Health and authentication operations are the only intentionally public/authentication-scoped exceptions.
 
+## M5 Frontend Role-Based Routing
+
+The frontend understands the canonical `BIDDER` and `OFFICER` roles resolved from `/api/v1/auth/me`. Centralized `ProtectedRoute` guards protect namespaced routes:
+- `/bidder/*`: restricted to canonical `BIDDER` role; officers redirected to `/officer`.
+- `/officer/*` and legacy preserved routes: restricted to canonical `OFFICER` role; bidders redirected to `/bidder`.
+- Unauthenticated users attempting to reach protected routes are redirected to `/login`.
+- Unresolved or invalid roles trigger a safe role-unavailable notice (never default to any role).
+- Navigation in Sidebar and Header dynamically reflects role context without cross-role link exposure.
+- Initial auth loading displays a stable loading indicator to eliminate redirect flicker.
+
+Frontend build: `npm run build` passed.
+Full backend regression: `390 passed, 1 warning`.
+
+FRONTEND ROUTE PROTECTION IS IMPLEMENTED FOR UX/NAVIGATION.
+
+BACKEND RBAC REMAINS THE AUTHORITATIVE SECURITY BOUNDARY.
+
 ## Next Milestone Instructions
 
-Milestone 05 is **Frontend Role-Based Routing**.
+Milestone 06 is **Landing Page + 3D Experience**.
 
 AUTHENTICATION IS IMPLEMENTED.
 
@@ -319,6 +336,6 @@ ROLE-BASED SIGNUP IS IMPLEMENTED.
 
 BACKEND RBAC IS IMPLEMENTED.
 
-FRONTEND ROLE-BASED ROUTING IS NOT YET IMPLEMENTED.
+FRONTEND ROLE-BASED ROUTING IS IMPLEMENTED.
 
-Milestone 05 may add frontend route protection as UX. Do not treat frontend auth state or the informational role returned by `/api/v1/auth/me` as authorization.
+Milestone 06 will implement the public SecondLook landing page and 3D procurement visual experience under `frontend/src/components/landing/`.

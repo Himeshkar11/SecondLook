@@ -88,7 +88,7 @@ export default function SignupPage() {
         gstNumber: role === 'BIDDER' ? form.gstNumber : null,
         panNumber: role === 'BIDDER' ? form.panNumber : null,
       });
-      navigate('/dashboard');
+      navigate(role === 'BIDDER' ? '/bidder' : '/officer');
     } catch (signupError) {
       setError(signupError.message);
     } finally {

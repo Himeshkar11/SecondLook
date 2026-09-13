@@ -32,7 +32,7 @@ export default function LoginPage() {
     setIsSubmitting(true);
     try {
       await signIn(email.trim(), password);
-      navigate('/dashboard');
+      navigate('/');
     } catch (signInError) {
       setError(signInError.message);
     } finally {
@@ -70,7 +70,7 @@ export default function LoginPage() {
             )}
             <button
               type="button"
-              onClick={() => navigate('/dashboard')}
+              onClick={() => navigate('/')}
               style={{
                 padding: 'var(--space-3)',
                 borderRadius: 'var(--radius-sm)',

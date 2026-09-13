@@ -1,6 +1,6 @@
 # SecondLook Milestone Status
 
-Current Milestone: 04 — Authentication + Backend Role Enforcement
+Current Milestone: 05 — Frontend Role-Based Routing + Navigation
 Status: COMPLETED / READY FOR REVIEW
 
 ## What Was Inspected
@@ -19,7 +19,7 @@ Status: COMPLETED / READY FOR REVIEW
 - A local `users` table/model exists with constrained canonical `BIDDER` and `OFFICER` roles alongside temporary legacy compatibility values.
 - `bidders.user_id` links bidder records to `users.id` and is unique; `users.auth_user_id` is a nullable unique Supabase identity mapping.
 - `officer_profiles` is the existing one-to-one officer profile foundation. No bid submission table exists; `tender_bidders` is the current tender/bidder association.
-- Frontend routes remain inside one unguarded layout. `/login` and `/signup` use Supabase Auth; no route guards or role-based routing were added (deferred to M5).
+- Frontend routes enforce centralized ProtectedRoute guards with canonical BIDDER and OFFICER namespaces and role-aware navigation implemented in M5.
 - Documents, evidence, evaluations, reviews, audit events, and processing endpoints are protected by centralized ownership and role dependencies.
 - Existing OCR, AI, government verification, evidence, compliance, review, audit, worker, Storage, and Task 17/19/20 systems are established protected systems.
 
@@ -46,20 +46,24 @@ Status: COMPLETED / READY FOR REVIEW
 - `backend/tests/test_authorization_boundaries.py`
 - `backend/tests/conftest.py`
 - `frontend/src/pages/SignupPage.jsx`
-- `frontend/src/pages/SignupPage.jsx`
+- `frontend/src/auth/ProtectedRoute.jsx`
+- `frontend/src/pages/bidder/BidderWorkspacePage.jsx`
 
 ## Files Modified
 
 - `backend/app/models/user.py`
 - `backend/app/models/bidder.py`
 - `backend/app/models/__init__.py`
-- `backend/app/models/user.py`
 - `backend/app/api/router.py`
 - `backend/app/dashboard/router.py`
 - `backend/app/schemas/__init__.py`
+- `frontend/src/auth/AuthContext.jsx`
 - `frontend/src/main.jsx`
 - `frontend/src/App.jsx`
 - `frontend/src/components/layout/Header.jsx`
+- `frontend/src/components/layout/Sidebar.jsx`
+- `frontend/src/pages/LoginPage.jsx`
+- `frontend/src/pages/SignupPage.jsx`
 - `frontend/package.json`
 - `frontend/package-lock.json`
 - `.env.example`
@@ -212,16 +216,39 @@ No migration was required. No frontend source was changed for M4.
 
 All sensitive bidder, tender, document, compliance, evidence, verification, requirement, review, audit, and dashboard routes now require centralized authentication and role/ownership authorization. Only health and authentication operations remain intentionally public or authentication-scoped.
 
+## M5 — Frontend Role-Based Routing + Navigation
+
+M5 establishes frontend role-aware routing, centralized route protection, and navigation using the canonical `BIDDER` and `OFFICER` roles established by M02–M04:
+
+- `AuthContext` resolves canonical `role` via `/api/v1/auth/me` with `isRoleLoading` and `isAuthResolving` tracking to eliminate redirect flicker.
+- Reusable centralized `ProtectedRoute` guard handles:
+  1. Active authentication/role resolution -> non-flickering loading indicator.
+  2. Unauthenticated state -> redirect to `/login` with return location.
+  3. Unknown/invalid role -> safe role-unavailable notice (never defaults to BIDDER or OFFICER, never renders privileged content).
+  4. Role mismatch -> redirects BIDDER attempting officer access to `/bidder`, and OFFICER attempting bidder access to `/officer`.
+  5. Authorized state -> renders destination workspace.
+- Namespaced public routes: `/`, `/login`, `/signup`.
+- Namespaced BIDDER routes: `/bidder`, `/bidder/tenders`, `/bidder/bids`, `/bidder/compliance`, `/bidder/documents`, `/bidder/profile`.
+- Namespaced OFFICER routes: `/officer`, `/officer/dashboard`, `/officer/tenders`, `/officer/tenders/:id`, `/officer/bidders`, `/officer/evaluations`, `/officer/reviews`, `/officer/audit`, `/officer/documents`.
+- Preserved existing domain routes wrapped under Officer role protection.
+- Role-aware sidebar navigation: dedicated items for BIDDER vs. OFFICER; no cross-role link exposure.
+- Role-aware header: displays canonical role badge (`BIDDER` or `OFFICER`), role-based logo navigation, and clean logout.
+
+Frontend build: `npm run build` passed.
+Full backend regression: `390 passed, 1 warning`.
+
+FRONTEND ROUTE PROTECTION IS IMPLEMENTED FOR UX/NAVIGATION.
+
+BACKEND RBAC REMAINS THE AUTHORITATIVE SECURITY BOUNDARY.
+
 ## Next Milestone
 
-Milestone 05 — Frontend Role-Based Routing
+Milestone 06 — Landing Page + 3D Experience
 
 ## STRICT DO NOT
 
-- implement dashboards
-- implement RBAC
-- create role middleware
-- create dashboards
+- implement bidder dashboards
+- implement officer dashboards
 - modify compliance
 - modify OCR
 - modify AI
@@ -230,7 +257,7 @@ Milestone 05 — Frontend Role-Based Routing
 - modify officer review
 - modify workers
 - modify historical migrations
-- implement frontend route guards before M5
+- start Milestone 06 before review
 
 AUTHENTICATION IS IMPLEMENTED.
 
@@ -238,6 +265,4 @@ ROLE-BASED SIGNUP IS IMPLEMENTED.
 
 BACKEND RBAC IS IMPLEMENTED.
 
-FRONTEND ROLE-BASED ROUTING IS NOT YET IMPLEMENTED.
-
-Milestone 05 may add frontend route protection as UX. Backend role enforcement remains the security boundary.
+FRONTEND ROLE-BASED ROUTING IS IMPLEMENTED.

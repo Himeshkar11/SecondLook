@@ -189,7 +189,7 @@ All sensitive legacy list, contract, compliance, review, verification, requireme
 
 BACKEND RBAC IS IMPLEMENTED.
 
-FRONTEND ROLE-BASED ROUTING IS NOT YET IMPLEMENTED.
+FRONTEND ROLE-BASED ROUTING IS IMPLEMENTED.
 
 ## Role Model
 
@@ -312,23 +312,17 @@ Current protection status for the routes below reflects M4 backend enforcement. 
 
 ## Frontend Route Inventory
 
-All current application routes are mounted inside `MainLayout`; no route guard exists. `/login` and `/signup` use the M3A/M3 authentication flows. Frontend classification is not a security boundary.
+Milestone 05 introduces centralized `ProtectedRoute` guards with canonical `BIDDER` and `OFFICER` namespaces, role-aware navigation, and safe fallback handling. Frontend route protection exists for UX/navigation; backend RBAC remains the authoritative security boundary.
 
-| Route | Current classification | Future classification |
-|---|---|---|
-| `/` | PUBLIC redirect to `/dashboard` | PUBLIC landing page |
-| `/login` | PUBLIC placeholder | PUBLIC |
-| `/dashboard` | Frontend route has no guard; backend APIs enforce role | Future frontend UX protection |
-| `/tenders` | Frontend route has no guard; backend APIs enforce authentication/role | Future frontend UX protection |
-| `/tenders/:id` | Frontend route has no guard; sensitive backend APIs are protected | Future frontend UX protection |
-| `/tenders/:id/dashboard` | Frontend route has no guard; backend dashboard API is OFFICER-only | Future frontend UX protection |
-| `/tenders/:id/workflow` | Frontend route has no guard; backend workflow APIs enforce their boundaries | Future frontend UX protection |
-| `/bidders` | Frontend route has no guard; bidder registry API is OFFICER-only | Future frontend UX protection |
-| `/bidders/:id` | Frontend route has no guard; bidder API enforces ownership | Future frontend UX protection |
-| `/documents` | Frontend route has no guard; global document API is OFFICER-only | Future frontend UX protection |
-| `/verification` | Frontend route has no guard; backend verification APIs enforce role/ownership | Future frontend UX protection |
-| `/audit` | Frontend route has no guard; backend audit APIs are OFFICER-only | Future frontend UX protection |
-| `/settings` | CURRENTLY UNPROTECTED/demo | Shared account settings, with role-specific sections |
+| Route | M5 Protection / Guard | Allowed Roles | Behavior |
+|---|---|---|---|
+| `/` | Public Root Resolver | Public | Redirects to role workspace (`/bidder` or `/officer`) or `/login` |
+| `/login` | Public | Public | Authenticates via Supabase Auth; navigates to role workspace |
+| `/signup` | Public | Public | Registers account + role profile; navigates to role workspace |
+| `/bidder/*` | `ProtectedRoute` | `BIDDER` only | Minimal shell for M5; wrong-role redirected to `/officer` |
+| `/officer/*` | `ProtectedRoute` | `OFFICER` only | Reuses Task 17/16 components; wrong-role redirected to `/bidder` |
+| `/dashboard`, `/tenders`, `/bidders`, `/documents`, `/verification`, `/audit` | `ProtectedRoute` | `OFFICER` only | Preserved legacy paths protected against unauthorized / bidder access |
+| `/settings` | `ProtectedRoute` | Authenticated (`BIDDER`, `OFFICER`) | Shared account settings |
 
 The future route shape should preserve current deep links where practical while adding `/bidder/*` and `/officer/*` layouts. Recommended structure:
 

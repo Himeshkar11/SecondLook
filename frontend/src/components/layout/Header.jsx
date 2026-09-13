@@ -1,18 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Badge from '../common/Badge.jsx';
 import { useAuth } from '../../auth/AuthContext.jsx';
 
 /**
- * Enterprise Portal Header
+ * Enterprise Portal Header — Milestone 05
  * Features:
- * - Direct SPA navigation via application logo to /dashboard
+ * - Role-aware Logo navigation (/bidder for BIDDER, /officer for OFFICER)
  * - Light / Dark Theme toggle with localStorage persistence
  * - National Tricolor Accent Bar
- * - Auditor status profile chip
+ * - Role status chip & authenticated user identity
+ * - Centralized sign out
  */
 export default function Header({ onToggleSidebar }) {
-  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+  const { user, role, isAuthenticated, signOut } = useAuth();
   const [theme, setTheme] = useState(() => {
     return localStorage.getItem('secondlook-theme') || 'light';
   });
@@ -25,6 +27,13 @@ export default function Header({ onToggleSidebar }) {
   const toggleTheme = () => {
     setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/login');
+  };
+
+  const logoDestination = role === 'BIDDER' ? '/bidder' : role === 'OFFICER' ? '/officer' : '/';
 
   return (
     <header
@@ -75,9 +84,9 @@ export default function Header({ onToggleSidebar }) {
             ☰
           </button>
 
-          {/* Clickable Logo navigating to /dashboard */}
+          {/* Clickable Logo navigating to role workspace */}
           <Link
-            to="/dashboard"
+            to={logoDestination}
             style={{
               display: 'flex',
               alignItems: 'baseline',
@@ -104,12 +113,12 @@ export default function Header({ onToggleSidebar }) {
               }}
               className="sl-header-sub"
             >
-              | GeM Tender & Bidder Compliance
+              | GeM Tender &amp; Bidder Compliance
             </span>
           </Link>
         </div>
 
-        {/* Right: Theme Toggle, Portal Status & User Area */}
+        {/* Right: Theme Toggle, Role Badge & User Area */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
           {/* Theme Toggle Button */}
           <button
@@ -133,7 +142,15 @@ export default function Header({ onToggleSidebar }) {
             <span>{theme === 'dark' ? 'Light' : 'Dark'}</span>
           </button>
 
-          <Badge variant="info">Demo Portal</Badge>
+          {role === 'OFFICER' ? (
+            <Badge variant="primary">OFFICER</Badge>
+          ) : role === 'BIDDER' ? (
+            <Badge variant="success">BIDDER</Badge>
+          ) : isAuthenticated ? (
+            <Badge variant="warning">NO ROLE</Badge>
+          ) : (
+            <Badge variant="info">Demo Portal</Badge>
+          )}
 
           <div
             style={{
@@ -160,21 +177,23 @@ export default function Header({ onToggleSidebar }) {
                 fontSize: 'var(--font-size-xs)',
               }}
             >
-              {user?.email?.slice(0, 2).toUpperCase() || 'AO'}
+              {user?.email?.slice(0, 2).toUpperCase() || '??'}
             </div>
             <span style={{ fontWeight: 'var(--font-weight-medium)' }}>
               {user?.email || 'Unauthenticated'}
             </span>
-            {user ? (
+            {isAuthenticated ? (
               <button
                 type="button"
-                onClick={() => signOut()}
+                onClick={handleSignOut}
                 style={{
                   padding: 'var(--space-1) var(--space-2)',
                   borderRadius: 'var(--radius-sm)',
                   border: '1px solid var(--color-border)',
                   color: 'var(--color-text-secondary)',
                   fontSize: 'var(--font-size-xs)',
+                  cursor: 'pointer',
+                  backgroundColor: 'var(--color-bg-subtle)',
                 }}
               >
                 Sign out

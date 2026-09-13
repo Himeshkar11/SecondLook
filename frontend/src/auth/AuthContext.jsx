@@ -2,13 +2,14 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { apiClient } from '../api/client.js';
 import { supabase, supabaseAuthConfigured } from './supabaseClient.js';
 
-const AuthContext = createContext(null);
+export const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [user, setUser] = useState(null);
   const [applicationUser, setApplicationUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRoleLoading, setIsRoleLoading] = useState(false);
   const [configurationError, setConfigurationError] = useState(null);
   const [identityError, setIdentityError] = useState(null);
 
@@ -21,14 +22,23 @@ export function AuthProvider({ children }) {
 
     let isMounted = true;
     const loadSession = async () => {
-      const { data, error } = await supabase.auth.getSession();
-      if (!isMounted) return;
-      if (error) {
-        setIdentityError('Unable to restore the authentication session.');
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (!isMounted) return;
+        if (error) {
+          setIdentityError('Unable to restore the authentication session.');
+        }
+        const initialSession = data?.session ?? null;
+        setSession(initialSession);
+        setUser(initialSession?.user ?? null);
+        if (!initialSession) {
+          setIsLoading(false);
+        }
+      } catch {
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
-      setSession(data?.session ?? null);
-      setUser(data?.session?.user ?? null);
-      setIsLoading(false);
     };
 
     loadSession();
@@ -39,23 +49,27 @@ export function AuthProvider({ children }) {
       if (!nextSession) {
         setApplicationUser(null);
         setIdentityError(null);
+        setIsLoading(false);
+        setIsRoleLoading(false);
       }
-      setIsLoading(false);
     });
 
     return () => {
       isMounted = false;
-      subscription.subscription.unsubscribe();
+      subscription?.subscription?.unsubscribe();
     };
   }, []);
 
   useEffect(() => {
     if (!session?.access_token) {
       setApplicationUser(null);
+      setIsRoleLoading(false);
+      setIsLoading(false);
       return undefined;
     }
 
     let isMounted = true;
+    setIsRoleLoading(true);
     const loadApplicationUser = async () => {
       try {
         const identity = await apiClient('/api/v1/auth/me', {
@@ -70,6 +84,11 @@ export function AuthProvider({ children }) {
           setApplicationUser(null);
           setIdentityError(error.message || 'Authenticated identity is not linked to this application.');
         }
+      } finally {
+        if (isMounted) {
+          setIsRoleLoading(false);
+          setIsLoading(false);
+        }
       }
     };
 
@@ -79,11 +98,26 @@ export function AuthProvider({ children }) {
     };
   }, [session]);
 
+  const role = useMemo(() => {
+    const rawRole = applicationUser?.role;
+    if (rawRole === 'BIDDER' || rawRole === 'OFFICER') {
+      return rawRole;
+    }
+    return null;
+  }, [applicationUser]);
+
+  const isAuthResolving = isLoading || isRoleLoading;
+  const isAuthenticated = Boolean(session && user);
+
   const value = useMemo(() => ({
     session,
     user,
     applicationUser,
+    role,
     isLoading,
+    isRoleLoading,
+    isAuthResolving,
+    isAuthenticated,
     isConfigured: supabaseAuthConfigured,
     configurationError,
     identityError,
@@ -93,7 +127,7 @@ export function AuthProvider({ children }) {
       if (error) throw new Error('Authentication failed. Check your email and password.');
       return data;
     },
-    async signUp({ email, password, role, fullName, legalName, registrationNumber, gstNumber, panNumber }) {
+    async signUp({ email, password, role: signupRole, fullName, legalName, registrationNumber, gstNumber, panNumber }) {
       if (!supabase) throw new Error('Authentication is not configured for this environment.');
       const { data, error } = await supabase.auth.signUp({ email, password });
       if (error) {
@@ -112,7 +146,7 @@ export function AuthProvider({ children }) {
           method: 'POST',
           headers: { Authorization: `Bearer ${data.session.access_token}` },
           body: JSON.stringify({
-            role,
+            role: signupRole,
             full_name: fullName,
             legal_name: legalName || null,
             registration_number: registrationNumber || null,
@@ -126,11 +160,32 @@ export function AuthProvider({ children }) {
       }
     },
     async signOut() {
-      if (!supabase) return;
-      const { error } = await supabase.auth.signOut();
-      if (error) throw new Error('Unable to sign out. Please try again.');
+      if (supabase) {
+        try {
+          await supabase.auth.signOut();
+        } catch {
+          // Proceed with local state cleanup
+        }
+      }
+      setSession(null);
+      setUser(null);
+      setApplicationUser(null);
+      setIdentityError(null);
+      setIsLoading(false);
+      setIsRoleLoading(false);
     },
-  }), [applicationUser, configurationError, identityError, isLoading, session, user]);
+  }), [
+    applicationUser,
+    configurationError,
+    identityError,
+    isAuthResolving,
+    isAuthenticated,
+    isLoading,
+    isRoleLoading,
+    role,
+    session,
+    user,
+  ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
