@@ -1,22 +1,22 @@
-# SecondLook Milestone 08 Handoff
+# SecondLook Milestone 09 Handoff
 
 ## Exact Stopping Point
 
-Milestones 01 through 08 are complete. The authenticated bidder workspace, proposal creation, private document upload, asynchronous OCR and structured AI extraction pipeline, statutory government verification integration, transparent processing tracking, and formal bid submission workflows are implemented and verified.
+Milestones 01 through 09 are complete. The authenticated bidder workspace, proposal creation, private document upload, asynchronous OCR and structured AI extraction pipeline, statutory government verification integration, transparent processing tracking, formal bid submission workflows, and bidder compliance score visibility layer with failure explanations are implemented and verified.
 
 The handoff state is:
-- Bid submission is implemented.
-- Bid document processing is implemented.
-- OCR reuses the existing system (`DocumentOCRWorker`).
-- AI extraction reuses the existing system (`DocumentAIWorker`).
-- Government verification reuses existing providers (`GovernmentVerificationService`, `GovernmentProviderRegistry`).
-- Evidence reuses the existing evidence architecture (`EvidenceResolver`).
-- Audit logging reuses the existing `AuditService` append-only trail.
-- Compliance scoring is NOT implemented (reserved for Milestone 09).
-- Bidder failure explanation is NOT implemented (reserved for Milestone 09).
-- No automatic bidder qualification, approval, rejection, or contract award exists.
+- Bidder compliance visibility is implemented.
+- Deterministic compliance scoring formula is implemented (`applicable = total - not_applicable`, `score = (passed / applicable) * 100.0`).
+- Factual failure/partial/unverified explanations and actionable remediation guidance are implemented.
+- Secure evidence traceability with signed document access is implemented.
+- Evaluation run history audit trail is implemented.
+- Prominent statutory disclaimers are enforced across UI and backend API responses.
+- Backend RBAC and bidder ownership are authoritative (`HTTP 403` on mismatch).
+- No duplicate compliance engine, evidence resolver, or evaluation models created.
+- No officer review logic mutated; no automatic qualification, disqualification, ranking, or award.
+- All changes are UNCOMMITTED in the working tree (`NOT COMMITTED`).
 
-Next milestone: Milestone 09 — Bidder Compliance Score + Failure Explanation.
+Next milestone: Milestone 10 — Officer Review & Disqualification Workflow.
 
 
 ## Repository Structure Discovered
@@ -377,29 +377,35 @@ The authenticated bidder experience is implemented:
 - Bidder Tender Discovery (`/bidder/tenders`): Read-only discovery of published procurement tenders using existing `GET /api/v1/tenders` and `GET /api/v1/tenders/{id}`, with detailed inspection modal and M8 bid submission notices.
 - Honest Placeholder States:
   - My Bids (`/bidder/bids`): Clear milestone notice that bid submission opens in Milestone 08.
-  - Bidder Documents (`/bidder/documents`): Clear milestone notice that document upload opens in Milestone 08.
-  - Compliance (`/bidder/compliance`): Clear milestone notice that compliance evaluation opens in Milestone 09.
-- Frontend API Client: Transparently attaches `Bearer ${token}` from Supabase Auth session for authenticated API calls.
+## M8 Bid Submission + Bidder Document Workflow
+- Asynchronous document pipeline tracking (`PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`) with on-demand manual retry.
+- Government statutory registry verification triggered on document extraction.
+- Formal bid submission enforcing at least one document and rendering submitted bids immutable.
+- Focused M8 tests: `10 passed`.
 
-Focused M7 tests: `7 passed`.
-Full backend regression: `397 passed, 1 warning`.
-Frontend build: `npm run build` passed.
+## M9 Bidder Compliance Score + Failure Explanation
+- Read-only bidder compliance visibility layer exposed at `GET /api/v1/bidder/bids/{bid_id}/compliance` and `GET /api/v1/bidder/bids/{bid_id}/compliance/history`.
+- Strictly informational legal disclaimer banner on UI and embedded in all backend compliance API payloads.
+- Clear honest empty state (`status="NOT_EVALUATED"`, `score=None`, `score_formatted="—"`) when evaluation has not run yet.
+- Deterministic compliance score: `applicable = total_requirements - not_applicable_count`. When `applicable > 0`: `score = round((pass_count / applicable) * 100.0, 1)`. When `applicable == 0`: `score = None` (`"—"`). `FAIL`, `PARTIAL`, and `NOT_VERIFIED` are never counted as passed.
+- Requirement breakdowns with code, title, mandatory badge, outcome badge, factual rationale from `ExplanationEngine`, actionable remediation guidance, and evidence links.
+- Evaluation run history table tracking immutable audit trail of past runs.
+- Cross-bidder access denied with HTTP 403; officer access to bidder compliance endpoints denied with HTTP 403; unauthenticated access denied with HTTP 401.
+- Focused M9 tests: `11 passed`.
+- Full backend regression: `422 passed, 1 warning`.
+- Frontend build: `npm run build` passed cleanly.
 
-BIDDER WORKSPACE FOUNDATION IS IMPLEMENTED.
+BIDDER COMPLIANCE SCORE AND FAILURE EXPLANATION IS IMPLEMENTED.
 
-ACTUAL BID SUBMISSION IS NOT IMPLEMENTED.
+OFFICER REVIEW AND DISQUALIFICATION WORKFLOW IS NOT IMPLEMENTED.
 
-BIDDER DOCUMENT UPLOAD/PROCESSING IS NOT IMPLEMENTED.
+NOT COMMITTED (WORKING TREE CHANGES ONLY).
 
-BIDDER COMPLIANCE SCORING IS NOT IMPLEMENTED.
-
-OFFICER DASHBOARD IS NOT IMPLEMENTED.
-
-MILESTONE 08 NOT STARTED.
+MILESTONE 10 NOT STARTED.
 
 ## Next Milestone Instructions
 
-Milestone 08 is **Bid Submission + Bidder Document Workflow**.
+Milestone 10 is **Officer Review & Disqualification Workflow**.
 
 AUTHENTICATION IS IMPLEMENTED.
 
@@ -413,4 +419,11 @@ LANDING PAGE + 3D EXPERIENCE IS IMPLEMENTED.
 
 BIDDER WORKSPACE FOUNDATION IS IMPLEMENTED.
 
-Milestone 08 will implement the actual bid submission data model, bidder document upload and OCR processing pipelines, and submission tracking.
+BID SUBMISSION + DOCUMENT PIPELINE IS IMPLEMENTED.
+
+BIDDER COMPLIANCE SCORE + EXPLANATIONS ARE IMPLEMENTED.
+
+Do NOT start Milestone 10 before review.
+Do NOT commit working tree changes.
+Do NOT modify officer review logic during M9 handoff.
+Do NOT auto-disqualify or rank bidders.

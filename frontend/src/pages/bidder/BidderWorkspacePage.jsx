@@ -85,9 +85,9 @@ export default function BidderWorkspacePage() {
         >
           <span style={{ fontSize: '20px', lineHeight: 1 }}>🛡️</span>
           <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)' }}>
-            <strong>Workspace &amp; Bid Submissions Active (Milestone 08)</strong>
+            <strong>Compliance Scoring &amp; Failure Explanations Active (Milestone 09)</strong>
             <p style={{ margin: 'var(--space-1) 0 0 0', color: 'var(--color-text-secondary)', fontSize: 'var(--font-size-xs)' }}>
-              Your bidder identity, document upload, and bid submission workflows are active. Automated compliance scoring and failure explanations will be enabled in <strong>Milestone 09</strong>.
+              Deterministic compliance scoring, failure explanations, and evidence traceability are now active. Inspect compliance scores and requirement-by-requirement explanations for your bids.
             </p>
           </div>
 
@@ -402,7 +402,7 @@ export default function BidderWorkspacePage() {
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span style={{ fontSize: '24px' }}>🛡️</span>
-                    <Badge variant="neutral">Milestone 09</Badge>
+                    <Badge variant="success">Active</Badge>
                   </div>
                   <h3 style={{ margin: 0, fontSize: 'var(--font-size-base)', color: 'var(--color-text-primary)' }}>
                     Compliance &amp; Explainability

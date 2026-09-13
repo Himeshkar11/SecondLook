@@ -225,6 +225,11 @@ export default function BidderBidDetailPage() {
       subtitle={`Reference: ${bid.tender_reference_number || 'N/A'} | Status: ${bid.status}`}
       actions={
         <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+          <Link to={`/bidder/bids/${bid.id}/compliance`} style={{ textDecoration: 'none' }}>
+            <Button variant="secondary" size="sm">
+              Compliance Score →
+            </Button>
+          </Link>
           <Link to="/bidder/bids" style={{ textDecoration: 'none' }}>
             <Button variant="outline" size="sm">
               ← All Bids
@@ -660,9 +665,16 @@ export default function BidderBidDetailPage() {
                 Submit Formal Bid Proposal →
               </Button>
             ) : (
-              <Badge variant="success" size="lg">
-                ✓ Proposal Formally Submitted
-              </Badge>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+                <Badge variant="success" size="lg">
+                  ✓ Proposal Formally Submitted
+                </Badge>
+                <Link to={`/bidder/bids/${bid.id}/compliance`} style={{ textDecoration: 'none' }}>
+                  <Button variant="primary">
+                    View Compliance Score &amp; Assessment →
+                  </Button>
+                </Link>
+              </div>
             )}
           </div>
         </div>

@@ -32,6 +32,7 @@ from app.api.deps import get_api_request_context, get_db
 from app.models.user import User
 from app.schemas.bidder import BidderProfileResponse
 from app.schemas.bid import BidCreateRequest, BidDocumentRead, BidRead, BidSubmitResponse
+from app.schemas.bidder_compliance import BidderComplianceHistoryItem, BidderComplianceViewResponse
 from app.services.bid_service import BidService
 from app.services.bidder_service import BidderService
 from app.services.document_service import DocumentService
@@ -663,6 +664,55 @@ def submit_bid(
         raise HTTPException(status_code=422, detail={"error": {"code": "VALIDATION_ERROR", "message": "Invalid bid ID format."}})
     service = BidService(db=db)
     return service.submit_bid(current_user.id, b_uuid)
+
+
+# ---------------------------------------------------------------------------
+# Milestone 09: Authenticated Bidder Compliance Score & Failure Explanation
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/bidder/bids/{bid_id}/compliance",
+    response_model=BidderComplianceViewResponse,
+    tags=["Bidder Compliance"],
+    summary="Get factual compliance assessment, deterministic score, and explanations for own bid",
+)
+def get_bid_compliance_endpoint(
+    bid_id: str,
+    current_user: User = Depends(require_bidder),
+    db: Session = Depends(get_db),
+):
+    """Retrieve compliance evaluation, score, requirement statuses, and explanations for a bid.
+
+    Ownership is strictly enforced: Bidders may only view compliance assessments
+    for their own bids. The score and explanations are strictly informational.
+    """
+    try:
+        b_uuid = UUID(bid_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail={"error": {"code": "VALIDATION_ERROR", "message": "Invalid bid ID format."}})
+    service = BidService(db=db)
+    return service.get_bid_compliance(current_user.id, b_uuid)
+
+
+@router.get(
+    "/bidder/bids/{bid_id}/compliance/history",
+    response_model=list[BidderComplianceHistoryItem],
+    tags=["Bidder Compliance"],
+    summary="Get historical compliance evaluation runs for own bid",
+)
+def get_bid_compliance_history_endpoint(
+    bid_id: str,
+    current_user: User = Depends(require_bidder),
+    db: Session = Depends(get_db),
+):
+    """Retrieve immutable audit history of all compliance evaluation runs for this bid."""
+    try:
+        b_uuid = UUID(bid_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail={"error": {"code": "VALIDATION_ERROR", "message": "Invalid bid ID format."}})
+    service = BidService(db=db)
+    return service.get_bid_compliance_history(current_user.id, b_uuid)
+
 
 
 @router.get("/bidders/{id}", tags=["Bidders"], summary="Get own bidder profile", responses={

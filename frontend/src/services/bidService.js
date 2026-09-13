@@ -53,3 +53,11 @@ export async function verifyDocument(documentId) {
 export async function getDocumentAccess(documentId) {
   return apiClient(`/api/v1/documents/${encodeURIComponent(documentId)}/access`);
 }
+
+export async function getBidCompliance(bidId) {
+  return apiClient(`/api/v1/bidder/bids/${encodeURIComponent(bidId)}/compliance`);
+}
+
+export async function getBidComplianceHistory(bidId) {
+  return apiClient(`/api/v1/bidder/bids/${encodeURIComponent(bidId)}/compliance/history`);
+}

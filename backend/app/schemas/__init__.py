@@ -24,6 +24,12 @@ from .compliance import (
 )
 
 from .bid import BidCreateRequest, BidDocumentRead, BidRead, BidSubmitResponse
+from .bidder_compliance import (
+    BidderComplianceHistoryItem,
+    BidderComplianceRequirementItem,
+    BidderComplianceSummary,
+    BidderComplianceViewResponse,
+)
 
 __all__ = [
     "UserCreate",
@@ -61,5 +67,9 @@ __all__ = [
     "BidderComplianceResponse",
     "ComplianceEvaluationRead",
     "ComplianceEvaluationSummaryItem",
+    "BidderComplianceRequirementItem",
+    "BidderComplianceSummary",
+    "BidderComplianceViewResponse",
+    "BidderComplianceHistoryItem",
 ]
 

@@ -186,9 +186,14 @@ export default function BidderBidsPage() {
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                    <Link to={`/bidder/bids/${bid.id}/compliance`} style={{ textDecoration: 'none' }}>
+                      <Button variant="secondary" size="sm">
+                        Compliance Score →
+                      </Button>
+                    </Link>
                     <Link to={`/bidder/bids/${bid.id}`} style={{ textDecoration: 'none' }}>
                       <Button variant={isSubmitted ? 'outline' : 'primary'} size="sm">
-                        {isSubmitted ? 'View Submission Workspace →' : 'Continue Proposal Workspace →'}
+                        {isSubmitted ? 'View Workspace' : 'Continue Proposal →'}
                       </Button>
                     </Link>
                   </div>

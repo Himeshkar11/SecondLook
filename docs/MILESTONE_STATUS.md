@@ -1,6 +1,6 @@
 # SecondLook Milestone Status
 
-Current Milestone: 08 — Bid Submission + Bidder Document Workflow
+Current Milestone: 09 — Bidder Compliance Score + Failure Explanation
 Status: COMPLETED
 
 
@@ -65,6 +65,9 @@ Status: COMPLETED
 - `frontend/src/pages/bidder/BidderBidsPage.jsx`
 - `frontend/src/pages/bidder/BidderBidDetailPage.jsx`
 - `frontend/src/pages/bidder/BidderDocumentsPage.jsx`
+- `backend/app/schemas/bidder_compliance.py`
+- `backend/tests/test_bidder_compliance_visibility.py`
+- `frontend/src/pages/bidder/BidderBidCompliancePage.jsx`
 
 ## Files Modified
 
@@ -324,27 +327,45 @@ Frontend build: `npm run build` passed.
 
 BIDDER WORKSPACE FOUNDATION IS IMPLEMENTED.
 
-ACTUAL BID SUBMISSION IS NOT IMPLEMENTED.
+## M8 — Bid Submission + Bidder Document Workflow
 
-BIDDER DOCUMENT UPLOAD/PROCESSING IS NOT IMPLEMENTED.
+Milestone 08 implemented the authenticated bid creation, private document pipeline integration, and formal bid submission workflow:
+- `bids` table with unique constraint `uq_bids_bidder_tender` ensuring one proposal workspace per tender.
+- Multi-document upload linked to private storage, creating processing jobs for `DocumentOCRWorker` and `DocumentAIWorker`.
+- Asynchronous pipeline tracking (`PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`) with on-demand manual retry.
+- Government statutory registry verification triggering upon document extraction.
+- Formal proposal submission enforcing at least one uploaded document and rendering the bid immutable (`HTTP 409` on modification attempts).
+- Focused M8 tests: `10 passed`.
 
-BIDDER COMPLIANCE SCORING IS NOT IMPLEMENTED.
+## M9 — Bidder Compliance Score + Failure Explanation
 
-OFFICER DASHBOARD IS NOT IMPLEMENTED.
+Milestone 09 implements the read-only bidder compliance visibility layer:
+- `GET /api/v1/bidder/bids/{bid_id}/compliance`: Protected by `require_bidder`. Enforces bid ownership (`current_user.id == Bidder.user_id`, HTTP 403 on mismatch).
+- Honest un-evaluated state: Returns `status="NOT_EVALUATED"`, `score=None`, `score_formatted="—"`, empty requirements list, and clear informational messaging when evaluations have not yet run.
+- Deterministic compliance score calculation: `applicable = total_requirements - not_applicable_count`. When `applicable > 0`: `score = round((pass_count / applicable) * 100.0, 1)`. When `applicable == 0`: `score = None` (`"—"`). `FAIL`, `PARTIAL`, and `NOT_VERIFIED` are never counted as passed.
+- Requirement breakdowns with statutory code, title, mandatory badge, outcome status, factual rationale from `ExplanationEngine`, actionable remediation guidance, and evidence links with signed private URL downloads.
+- Evaluation run history: `GET /api/v1/bidder/bids/{bid_id}/compliance/history` returning immutable audit trail of past evaluation runs.
+- Prominent statutory disclaimer: "Informational assessment based on currently evaluated requirements. Final tender decisions are made through the official procurement officer review process. SecondLook does not approve, qualify, rank, or award tenders."
+- Zero officer review logic mutation, zero automated qualification/disqualification/ranking/award.
+- Focused M9 tests: `11 passed`.
+- Full backend regression: `422 passed, 1 warning`.
+- Frontend build: `npm run build` passed cleanly.
 
-MILESTONE 08 NOT STARTED.
+BIDDER COMPLIANCE SCORE AND FAILURE EXPLANATION IS IMPLEMENTED.
+
+OFFICER REVIEW AND DISQUALIFICATION WORKFLOW IS NOT IMPLEMENTED.
+
+NOT COMMITTED (WORKING TREE CHANGES ONLY).
+
+MILESTONE 10 NOT STARTED.
 
 ## Next Milestone
 
-Milestone 08 — Bid Submission + Bidder Document Workflow
+Milestone 10 — Officer Review & Disqualification Workflow
 
 ## STRICT DO NOT
 
-- implement actual bid upload
-- implement bid submission
-- implement bidder document processing workflow
-- implement bidder OCR workflow
-- implement bidder AI extraction
-- implement bidder compliance scoring
-- implement officer dashboard
-- start Milestone 08 before review
+- start Milestone 10 before review
+- commit working tree changes
+- modify officer review or evaluation engine
+- auto-disqualify or rank bidders
