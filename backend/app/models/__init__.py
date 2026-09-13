@@ -1,5 +1,6 @@
 from .base import Base
 from .user import User
+from .officer_profile import OfficerProfile
 from .tender import Tender
 from .bidder import Bidder
 from .document import Document
@@ -13,6 +14,7 @@ from app.review.models import OfficerReview, RequirementReview  # Task 16
 __all__ = [
     "Base",
     "User",
+    "OfficerProfile",
     "Tender",
     "Bidder",
     "Document",
