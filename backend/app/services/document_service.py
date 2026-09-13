@@ -21,11 +21,14 @@ from app.database.connection import SessionLocal
 from app.models.bidder import Bidder
 from app.models.document import Document
 from app.workers.jobs import (
+    DocumentAIJobRecord,
+    DocumentAIStatus,
     DocumentOCRJobRecord,
     DocumentOCRStatus,
+    document_ai_queue,
     document_ocr_queue,
 )
-from app.workers.worker import DocumentOCRWorker
+from app.workers.worker import DocumentAIWorker, DocumentOCRWorker
 
 logger = logging.getLogger(__name__)
 
@@ -318,6 +321,12 @@ class DocumentService:
                     "has_ocr_text": bool(d.ocr_text),
                     "ocr_error": d.ocr_error,
                     "ocr_completed_at": d.ocr_completed_at.isoformat() if d.ocr_completed_at else None,
+                    "ai_status": d.ai_status,
+                    "ai_extraction": d.ai_extraction,
+                    "ai_error": d.ai_error,
+                    "ai_completed_at": d.ai_completed_at.isoformat() if d.ai_completed_at else None,
+                    "ai_model": d.ai_model,
+                    "ai_prompt_version": d.ai_prompt_version,
                     "verifiedBy": "System",
                     "uploaded_at": d.uploaded_at.isoformat() if d.uploaded_at else None,
                     "uploadedDate": d.uploaded_at.strftime("%d %b %Y") if d.uploaded_at else "—",
@@ -375,6 +384,12 @@ class DocumentService:
                 "ocr_text": doc.ocr_text,
                 "ocr_error": doc.ocr_error,
                 "ocr_completed_at": doc.ocr_completed_at.isoformat() if doc.ocr_completed_at else None,
+                "ai_status": doc.ai_status,
+                "ai_extraction": doc.ai_extraction,
+                "ai_error": doc.ai_error,
+                "ai_completed_at": doc.ai_completed_at.isoformat() if doc.ai_completed_at else None,
+                "ai_model": doc.ai_model,
+                "ai_prompt_version": doc.ai_prompt_version,
                 "verifiedBy": "System",
                 "uploaded_at": doc.uploaded_at.isoformat() if doc.uploaded_at else None,
                 "uploadedDate": doc.uploaded_at.strftime("%d %b %Y") if doc.uploaded_at else "—",
@@ -448,6 +463,77 @@ class DocumentService:
                 "document_id": str(doc.id),
                 "status": "QUEUED",
                 "ocr_status": "QUEUED",
+            }
+        finally:
+            if should_close and session is not None:
+                session.close()
+
+    def get_document_ai(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve AI extraction status, structured JSON data, model, and safe error information."""
+        doc = self.get_document(document_id)
+        if doc is None:
+            return None
+
+        return {
+            "document_id": doc["id"],
+            "status": doc.get("ai_status") or "AI_PENDING",
+            "ai_status": doc.get("ai_status") or "AI_PENDING",
+            "extraction": doc.get("ai_extraction"),
+            "ai_extraction": doc.get("ai_extraction"),
+            "error": doc.get("ai_error"),
+            "ai_error": doc.get("ai_error"),
+            "model": doc.get("ai_model"),
+            "ai_model": doc.get("ai_model"),
+            "prompt_version": doc.get("ai_prompt_version"),
+            "ai_prompt_version": doc.get("ai_prompt_version"),
+            "completed_at": doc.get("ai_completed_at"),
+            "ai_completed_at": doc.get("ai_completed_at"),
+        }
+
+    def retry_document_ai(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Re-queue an AI extraction job for a failed or stuck document."""
+        try:
+            doc_uuid = uuid.UUID(document_id)
+        except ValueError:
+            return None
+
+        session = self.db
+        should_close = False
+        if session is None and SessionLocal is not None:
+            session = SessionLocal()
+            should_close = True
+
+        if session is None:
+            return None
+
+        try:
+            doc = session.scalar(select(Document).where(Document.id == doc_uuid))
+            if not doc:
+                return None
+
+            doc.ai_status = "AI_PENDING"
+            doc.ai_error = None
+            session.commit()
+
+            job = document_ai_queue.get_document_ai_job(document_id)
+            if job:
+                job.status = DocumentAIStatus.AI_PENDING
+                job.error = None
+                document_ai_queue.update_job(job)
+            else:
+                job = DocumentAIJobRecord(
+                    document_id=str(doc.id),
+                    bidder_id=str(doc.bidder_id),
+                    document_type=doc.document_type,
+                    ocr_text=doc.ocr_text,
+                    status=DocumentAIStatus.AI_PENDING,
+                )
+                document_ai_queue.enqueue(job)
+
+            return {
+                "document_id": str(doc.id),
+                "status": "AI_PENDING",
+                "ai_status": "AI_PENDING",
             }
         finally:
             if should_close and session is not None:

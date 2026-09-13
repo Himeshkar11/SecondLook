@@ -53,3 +53,13 @@ export async function retryDocumentOCR(documentId) {
     method: 'POST',
   });
 }
+
+export async function getDocumentAI(documentId) {
+  return apiClient(`/api/v1/documents/${encodeURIComponent(documentId)}/ai`);
+}
+
+export async function retryDocumentAI(documentId) {
+  return apiClient(`/api/v1/documents/${encodeURIComponent(documentId)}/ai/retry`, {
+    method: 'POST',
+  });
+}

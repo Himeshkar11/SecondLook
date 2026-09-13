@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     storage_bucket: str = Field(default="bidder-documents", alias="STORAGE_BUCKET")
 
     ai_api_key: str = Field(default="", alias="AI_API_KEY")
+    ai_provider: str = Field(default="demo", alias="AI_PROVIDER")
+    openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
+    openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL")
+    openrouter_primary_model: str = Field(default="google/gemini-2.5-flash", alias="OPENROUTER_PRIMARY_MODEL")
+    openrouter_fallback_model_1: str = Field(default="anthropic/claude-3-haiku", alias="OPENROUTER_FALLBACK_MODEL_1")
+    openrouter_fallback_model_2: str = Field(default="openai/gpt-4o-mini", alias="OPENROUTER_FALLBACK_MODEL_2")
+    ai_timeout_seconds: float = Field(default=60.0, alias="AI_TIMEOUT_SECONDS")
+    ai_max_retries: int = Field(default=1, alias="AI_MAX_RETRIES")
 
     ocr_provider: str = Field(default="", alias="OCR_PROVIDER")
     ocr_api_key: str = Field(default="", alias="OCR_API_KEY")
@@ -46,6 +54,8 @@ class Settings(BaseSettings):
             self.supabase_url = self.vite_supabase_url
         if not self.supabase_key and self.vite_supabase_publishable_key:
             self.supabase_key = self.vite_supabase_publishable_key
+        if not self.openrouter_api_key and self.ai_api_key:
+            self.openrouter_api_key = self.ai_api_key
 
     @property
     def app_environment(self) -> str:

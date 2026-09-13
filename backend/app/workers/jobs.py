@@ -127,18 +127,77 @@ class DocumentOCRJobRecord(BaseModel):
             self.error = error
 
 
+class DocumentAIStatus(str, Enum):
+    """Controlled AI extraction lifecycle statuses."""
+
+    AI_PENDING = "AI_PENDING"
+    AI_PROCESSING = "AI_PROCESSING"
+    AI_COMPLETED = "AI_COMPLETED"
+    AI_FAILED = "AI_FAILED"
+
+
+class DocumentAIJobRecord(BaseModel):
+    """Job container representing an asynchronous document AI extraction request."""
+
+    job_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    document_id: str = Field(..., description="Document identifier")
+    bidder_id: Optional[str] = Field(None, description="Bidder or vendor identifier")
+    document_type: str = Field(default="OTHER", description="Document type classification")
+    ocr_text: Optional[str] = Field(None, description="Raw OCR extracted text")
+    status: DocumentAIStatus = Field(default=DocumentAIStatus.AI_PENDING, description="Lifecycle status")
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    completed_at: Optional[str] = Field(None, description="Completion timestamp")
+    result: Optional[Dict[str, Any]] = Field(None, description="Extracted JSON result")
+    error: Optional[str] = Field(None, description="Failure reason if execution failed")
+    ai_model: Optional[str] = Field(None, description="Model used for extraction")
+    prompt_version: Optional[str] = Field(None, description="Prompt version used")
+    attempt_count: int = Field(default=0, ge=0, description="Number of attempts")
+    max_retries: int = Field(default=2, ge=0, description="Maximum allowed attempts")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Job metadata")
+
+    def transition_to(self, new_status: DocumentAIStatus, error: Optional[str] = None) -> None:
+        """Enforce strict document AI status transitions:
+        AI_PENDING -> AI_PROCESSING or AI_FAILED
+        AI_PROCESSING -> AI_COMPLETED or AI_FAILED
+        AI_FAILED -> AI_PENDING (for retry)
+        """
+        valid_transitions = {
+            DocumentAIStatus.AI_PENDING: {DocumentAIStatus.AI_PROCESSING, DocumentAIStatus.AI_FAILED},
+            DocumentAIStatus.AI_PROCESSING: {DocumentAIStatus.AI_COMPLETED, DocumentAIStatus.AI_FAILED},
+            DocumentAIStatus.AI_COMPLETED: set(),
+            DocumentAIStatus.AI_FAILED: {DocumentAIStatus.AI_PENDING},
+        }
+
+        allowed = valid_transitions.get(self.status, set())
+        if new_status not in allowed:
+            raise InvalidStateTransitionError(
+                f"Cannot transition document AI job {self.job_id} from {self.status} to {new_status}"
+            )
+
+        self.status = new_status
+        now_str = datetime.now(timezone.utc).isoformat()
+        self.updated_at = now_str
+        if new_status == DocumentAIStatus.AI_COMPLETED:
+            self.completed_at = now_str
+        if error:
+            self.error = error
+
+
 class JobQueue:
-    """In-memory queue for verification and OCR processing jobs."""
+    """In-memory queue for verification, OCR, and AI processing jobs."""
 
     def __init__(self) -> None:
         self._jobs: Dict[str, Any] = {}
         self._queue: List[str] = []
 
     def enqueue(self, job: Any) -> Any:
-        """Enqueue a new job in QUEUED status."""
-        if hasattr(job, "status"):
-            if isinstance(job.status, DocumentOCRStatus):
+        """Enqueue a new job in initial pending/queued status if not already set."""
+        if hasattr(job, "status") and not job.status:
+            if isinstance(job, DocumentOCRJobRecord):
                 job.status = DocumentOCRStatus.QUEUED
+            elif isinstance(job, DocumentAIJobRecord):
+                job.status = DocumentAIStatus.AI_PENDING
             else:
                 job.status = JobStatus.QUEUED
         self._jobs[job.job_id] = job
@@ -146,12 +205,14 @@ class JobQueue:
         return job
 
     def dequeue(self) -> Optional[Any]:
-        """Retrieve the next QUEUED job in FIFO order."""
+        """Retrieve the next pending job in FIFO order."""
         while self._queue:
             job_id = self._queue.pop(0)
             job = self._jobs.get(job_id)
             if job:
                 if isinstance(job, DocumentOCRJobRecord) and job.status == DocumentOCRStatus.QUEUED:
+                    return job
+                if isinstance(job, DocumentAIJobRecord) and job.status == DocumentAIStatus.AI_PENDING:
                     return job
                 if isinstance(job, VerificationJobRecord) and job.status == JobStatus.QUEUED:
                     return job
@@ -168,6 +229,13 @@ class JobQueue:
                 return j
         return None
 
+    def get_document_ai_job(self, document_id: str) -> Optional[DocumentAIJobRecord]:
+        """Fetch an AI job by document ID."""
+        for j in self._jobs.values():
+            if isinstance(j, DocumentAIJobRecord) and j.document_id == document_id:
+                return j
+        return None
+
     def update_job(self, job: Any) -> None:
         """Update job state in the repository."""
         self._jobs[job.job_id] = job
@@ -177,10 +245,12 @@ class JobQueue:
         return len(self._jobs)
 
     def pending_count(self) -> int:
-        """Return count of jobs waiting in QUEUED status."""
+        """Return count of jobs waiting in initial status."""
         count = 0
         for j in self._jobs.values():
             if isinstance(j, DocumentOCRJobRecord) and j.status == DocumentOCRStatus.QUEUED:
+                count += 1
+            elif isinstance(j, DocumentAIJobRecord) and j.status == DocumentAIStatus.AI_PENDING:
                 count += 1
             elif isinstance(j, VerificationJobRecord) and j.status == JobStatus.QUEUED:
                 count += 1
@@ -189,3 +259,6 @@ class JobQueue:
 
 # Global in-memory OCR job queue instance
 document_ocr_queue = JobQueue()
+
+# Global in-memory AI extraction job queue instance
+document_ai_queue = JobQueue()

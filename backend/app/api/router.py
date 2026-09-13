@@ -19,7 +19,8 @@ from app.services.bidder_service import BidderService
 from app.services.document_service import DocumentService
 from app.services.tender_service import TenderService
 from app.services.verification_service import VerificationService
-from app.workers.worker import DocumentOCRWorker
+from app.workers.jobs import DocumentOCRStatus
+from app.workers.worker import DocumentAIWorker, DocumentOCRWorker
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +172,10 @@ async def upload_bidder_document(
 
         def _run_ocr_async(d_id: str, f_bytes: bytes):
             worker = DocumentOCRWorker()
-            worker.process_document_by_id(d_id, content_override=f_bytes)
+            job = worker.process_document_by_id(d_id, content_override=f_bytes)
+            if job and job.status == DocumentOCRStatus.OCR_COMPLETED:
+                ai_worker = DocumentAIWorker()
+                ai_worker.process_document_by_id(d_id)
 
         background_tasks.add_task(_run_ocr_async, doc_id, content)
 
@@ -262,6 +266,48 @@ def retry_document_ocr(document_id: str, background_tasks: BackgroundTasks, db: 
             worker.process_document_by_id(document_id)
 
         background_tasks.add_task(_run_retry)
+        return res
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": {"code": "RETRY_FAILED", "message": str(exc), "details": {}}}) from exc
+
+
+@router.get("/documents/{document_id}/ai", tags=["Documents"], summary="Get document AI extraction details", responses={
+    200: {"description": "Document AI extraction status and structured JSON."},
+    404: {"description": "Document not found."},
+    500: {"description": "Database query error."}
+})
+def get_document_ai(document_id: str, db: Session = Depends(get_db)):
+    """Retrieve AI extraction status and structured JSON for a document."""
+    service = DocumentService(db=db)
+    try:
+        ai_info = service.get_document_ai(document_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to load document AI extraction details", "details": {}}}) from exc
+    if ai_info is None:
+        raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Document not found", "details": {}}})
+    return ai_info
+
+
+@router.post("/documents/{document_id}/ai/retry", tags=["Documents"], summary="Retry document AI extraction", responses={
+    200: {"description": "Document re-queued for AI extraction."},
+    404: {"description": "Document not found."},
+    500: {"description": "Database or worker error."}
+})
+def retry_document_ai(document_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Re-queue an AI extraction job for a failed or stuck document."""
+    service = DocumentService(db=db)
+    try:
+        res = service.retry_document_ai(document_id)
+        if res is None:
+            raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Document not found", "details": {}}})
+
+        def _run_ai_retry():
+            worker = DocumentAIWorker()
+            worker.process_document_by_id(document_id, force_retry=True)
+
+        background_tasks.add_task(_run_ai_retry)
         return res
     except HTTPException:
         raise

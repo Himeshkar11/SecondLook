@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, JSON, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -23,6 +23,12 @@ class Document(Base):
     ocr_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     ocr_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     ocr_completed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ai_status: Mapped[str | None] = mapped_column(String, nullable=True, default="AI_PENDING")
+    ai_extraction: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    ai_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_completed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ai_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    ai_prompt_version: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

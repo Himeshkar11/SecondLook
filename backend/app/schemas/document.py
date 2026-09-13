@@ -24,3 +24,9 @@ class DocumentRead(BaseModel):
     ocr_text: str | None = None
     ocr_error: str | None = None
     ocr_completed_at: str | None = None
+    ai_status: str | None = None
+    ai_extraction: dict | None = None
+    ai_error: str | None = None
+    ai_completed_at: str | None = None
+    ai_model: str | None = None
+    ai_prompt_version: str | None = None
