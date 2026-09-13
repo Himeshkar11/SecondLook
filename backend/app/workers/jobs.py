@@ -1,19 +1,20 @@
-"""Job models and queue abstraction for asynchronous verification tasks.
+"""Job models and queue abstraction for asynchronous document processing and verification tasks.
 
-Defines the exact core lifecycle statuses (QUEUED -> PROCESSING -> COMPLETED/FAILED),
-the VerificationJobRecord container, and an in-memory JobQueue.
+Defines the exact core lifecycle statuses:
+- Document OCR statuses: UPLOADED -> QUEUED -> OCR_PROCESSING -> OCR_COMPLETED / OCR_FAILED
+- Verification statuses: QUEUED -> PROCESSING -> COMPLETED / FAILED
 """
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
-import uuid
 
 from pydantic import BaseModel, Field
 
-from app.ocr.processor import DocumentInput
+from app.ocr.processor import DocumentInput, ExtractedText
 from app.verification.pipeline import VerificationPipelineResult
 
 
@@ -26,16 +27,22 @@ class JobStatus(str, Enum):
     FAILED = "FAILED"
 
 
+class DocumentOCRStatus(str, Enum):
+    """Controlled OCR processing lifecycle statuses."""
+
+    UPLOADED = "UPLOADED"
+    QUEUED = "QUEUED"
+    OCR_PROCESSING = "OCR_PROCESSING"
+    OCR_COMPLETED = "OCR_COMPLETED"
+    OCR_FAILED = "OCR_FAILED"
+
+
 class InvalidStateTransitionError(RuntimeError):
     """Raised when an illegal job status transition is attempted."""
 
 
 class VerificationJobRecord(BaseModel):
-    """Job container representing an asynchronous verification request.
-
-    Carries the job identifier, entity/document references, current lifecycle
-    status, attempt counter, and the attached VerificationPipelineResult upon completion.
-    """
+    """Job container representing an asynchronous verification request."""
 
     job_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     entity_id: str = Field(..., description="Bidder or vendor identifier")
@@ -52,12 +59,7 @@ class VerificationJobRecord(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Job context metadata")
 
     def transition_to(self, new_status: JobStatus, error: Optional[str] = None) -> None:
-        """Enforce strict status transitions according to the job lifecycle:
-
-        QUEUED -> PROCESSING -> COMPLETED
-        or
-        QUEUED -> PROCESSING -> FAILED
-        """
+        """Enforce strict status transitions according to the verification job lifecycle."""
         valid_transitions = {
             JobStatus.QUEUED: {JobStatus.PROCESSING},
             JobStatus.PROCESSING: {JobStatus.COMPLETED, JobStatus.FAILED},
@@ -77,38 +79,96 @@ class VerificationJobRecord(BaseModel):
             self.error = error
 
 
-class JobQueue:
-    """In-memory queue for verification jobs.
+class DocumentOCRJobRecord(BaseModel):
+    """Job container representing an asynchronous document OCR processing request."""
 
-    Provides deterministic FIFO scheduling for the M16 skeleton.
-    Can be swapped later for a distributed broker without changing the worker.
-    """
+    job_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    document_id: str = Field(..., description="Document identifier")
+    bidder_id: str = Field(..., description="Bidder or vendor identifier")
+    storage_path: Optional[str] = Field(None, description="Path to file in storage")
+    file_name: str = Field(default="document.pdf", description="Original file name")
+    mime_type: Optional[str] = Field(default="application/pdf", description="MIME type")
+    document_type: str = Field(default="OTHER", description="Document type classification")
+    status: DocumentOCRStatus = Field(default=DocumentOCRStatus.QUEUED, description="Lifecycle status")
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    completed_at: Optional[str] = Field(None, description="Completion timestamp")
+    result: Optional[ExtractedText] = Field(None, description="OCR extraction result")
+    error: Optional[str] = Field(None, description="Failure reason if execution failed")
+    attempt_count: int = Field(default=0, ge=0, description="Number of attempts")
+    max_retries: int = Field(default=3, ge=0, description="Maximum allowed attempts")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Job metadata")
+
+    def transition_to(self, new_status: DocumentOCRStatus, error: Optional[str] = None) -> None:
+        """Enforce strict document OCR status transitions:
+        UPLOADED -> QUEUED -> OCR_PROCESSING -> OCR_COMPLETED or OCR_FAILED
+        OCR_FAILED -> QUEUED (for retry)
+        """
+        valid_transitions = {
+            DocumentOCRStatus.UPLOADED: {DocumentOCRStatus.QUEUED},
+            DocumentOCRStatus.QUEUED: {DocumentOCRStatus.OCR_PROCESSING},
+            DocumentOCRStatus.OCR_PROCESSING: {DocumentOCRStatus.OCR_COMPLETED, DocumentOCRStatus.OCR_FAILED},
+            DocumentOCRStatus.OCR_COMPLETED: set(),
+            DocumentOCRStatus.OCR_FAILED: {DocumentOCRStatus.QUEUED},
+        }
+
+        allowed = valid_transitions.get(self.status, set())
+        if new_status not in allowed:
+            raise InvalidStateTransitionError(
+                f"Cannot transition document OCR job {self.job_id} from {self.status} to {new_status}"
+            )
+
+        self.status = new_status
+        now_str = datetime.now(timezone.utc).isoformat()
+        self.updated_at = now_str
+        if new_status == DocumentOCRStatus.OCR_COMPLETED:
+            self.completed_at = now_str
+        if error:
+            self.error = error
+
+
+class JobQueue:
+    """In-memory queue for verification and OCR processing jobs."""
 
     def __init__(self) -> None:
-        self._jobs: Dict[str, VerificationJobRecord] = {}
+        self._jobs: Dict[str, Any] = {}
         self._queue: List[str] = []
 
-    def enqueue(self, job: VerificationJobRecord) -> VerificationJobRecord:
+    def enqueue(self, job: Any) -> Any:
         """Enqueue a new job in QUEUED status."""
-        job.status = JobStatus.QUEUED
+        if hasattr(job, "status"):
+            if isinstance(job.status, DocumentOCRStatus):
+                job.status = DocumentOCRStatus.QUEUED
+            else:
+                job.status = JobStatus.QUEUED
         self._jobs[job.job_id] = job
         self._queue.append(job.job_id)
         return job
 
-    def dequeue(self) -> Optional[VerificationJobRecord]:
+    def dequeue(self) -> Optional[Any]:
         """Retrieve the next QUEUED job in FIFO order."""
         while self._queue:
             job_id = self._queue.pop(0)
             job = self._jobs.get(job_id)
-            if job and job.status == JobStatus.QUEUED:
-                return job
+            if job:
+                if isinstance(job, DocumentOCRJobRecord) and job.status == DocumentOCRStatus.QUEUED:
+                    return job
+                if isinstance(job, VerificationJobRecord) and job.status == JobStatus.QUEUED:
+                    return job
         return None
 
-    def get_job(self, job_id: str) -> Optional[VerificationJobRecord]:
+    def get_job(self, job_id: str) -> Optional[Any]:
         """Fetch a job by ID."""
         return self._jobs.get(job_id)
 
-    def update_job(self, job: VerificationJobRecord) -> None:
+    def get_document_job(self, document_id: str) -> Optional[DocumentOCRJobRecord]:
+        """Fetch an OCR job by document ID."""
+        for j in self._jobs.values():
+            if isinstance(j, DocumentOCRJobRecord) and j.document_id == document_id:
+                return j
+        return None
+
+    def update_job(self, job: Any) -> None:
         """Update job state in the repository."""
         self._jobs[job.job_id] = job
 
@@ -118,4 +178,14 @@ class JobQueue:
 
     def pending_count(self) -> int:
         """Return count of jobs waiting in QUEUED status."""
-        return sum(1 for j in self._jobs.values() if j.status == JobStatus.QUEUED)
+        count = 0
+        for j in self._jobs.values():
+            if isinstance(j, DocumentOCRJobRecord) and j.status == DocumentOCRStatus.QUEUED:
+                count += 1
+            elif isinstance(j, VerificationJobRecord) and j.status == JobStatus.QUEUED:
+                count += 1
+        return count
+
+
+# Global in-memory OCR job queue instance
+document_ocr_queue = JobQueue()

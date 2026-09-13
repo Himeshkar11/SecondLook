@@ -20,3 +20,7 @@ class DocumentRead(BaseModel):
     storage_path: str | None = None
     mime_type: str | None = None
     status: str
+    ocr_status: str | None = None
+    ocr_text: str | None = None
+    ocr_error: str | None = None
+    ocr_completed_at: str | None = None

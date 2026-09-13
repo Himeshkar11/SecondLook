@@ -43,3 +43,13 @@ export async function getDocument(documentId) {
 export async function getDocumentAccess(documentId) {
   return apiClient(`/api/v1/documents/${encodeURIComponent(documentId)}/access`);
 }
+
+export async function getDocumentOCR(documentId) {
+  return apiClient(`/api/v1/documents/${encodeURIComponent(documentId)}/ocr`);
+}
+
+export async function retryDocumentOCR(documentId) {
+  return apiClient(`/api/v1/documents/${encodeURIComponent(documentId)}/ocr/retry`, {
+    method: 'POST',
+  });
+}

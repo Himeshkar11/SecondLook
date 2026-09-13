@@ -1,11 +1,18 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import PageContainer from '../components/layout/PageContainer.jsx';
 import Badge from '../components/common/Badge.jsx';
 import Button from '../components/common/Button.jsx';
 import Loading from '../components/common/Loading.jsx';
 import EmptyState from '../components/common/EmptyState.jsx';
-import { getAllDocuments, uploadDocument, getDocumentAccess } from '../services/documentService.js';
+import Modal from '../components/common/Modal.jsx';
+import {
+  getAllDocuments,
+  uploadDocument,
+  getDocumentAccess,
+  getDocumentOCR,
+  retryDocumentOCR,
+} from '../services/documentService.js';
 import { getBidders } from '../services/bidderService.js';
 
 const DOCUMENT_TYPES = [
@@ -25,7 +32,8 @@ const DOCUMENT_TYPES = [
 
 /**
  * DocumentsPage — Dynamic Supabase-backed document repository view.
- * Displays documents from the database and provides a secure upload interface.
+ * Displays documents from PostgreSQL with OCR processing lifecycle states,
+ * raw extracted text viewer, and automatic polling for active jobs.
  */
 export default function DocumentsPage() {
   const navigate = useNavigate();
@@ -46,9 +54,18 @@ export default function DocumentsPage() {
   const [uploadSuccess, setUploadSuccess] = useState(null);
   const [uploadError, setUploadError] = useState(null);
 
+  // OCR Modal State
+  const [ocrModalOpen, setOcrModalOpen] = useState(false);
+  const [activeOcrDoc, setActiveOcrDoc] = useState(null);
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [retryingDocId, setRetryingDocId] = useState(null);
+
+  // Polling ref to prevent concurrent poll runs
+  const pollingTimerRef = useRef(null);
+
   // Fetch initial bidders list and documents
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (isPolling = false) => {
+    if (!isPolling) setLoading(true);
     setError(null);
     try {
       const [biddersRes, docsRes] = await Promise.all([
@@ -64,15 +81,42 @@ export default function DocumentsPage() {
         setUploadBidderId(bidderItems[0].id);
       }
     } catch (err) {
-      setError('Unable to load documents repository. Please check connection and try again.');
+      if (!isPolling) {
+        setError('Unable to load documents repository. Please check connection and try again.');
+      }
     } finally {
-      setLoading(false);
+      if (!isPolling) setLoading(false);
     }
   }, [selectedBidderFilter, uploadBidderId]);
 
   useEffect(() => {
-    loadData();
+    loadData(false);
   }, [loadData]);
+
+  // Polling effect: poll every 3 seconds if any document is QUEUED or OCR_PROCESSING
+  useEffect(() => {
+    const hasActiveJobs = documents.some((d) => {
+      const s = (d.ocr_status || d.status || '').toUpperCase();
+      return s === 'QUEUED' || s === 'OCR_PROCESSING' || s === 'PROCESSING';
+    });
+
+    if (hasActiveJobs) {
+      pollingTimerRef.current = setTimeout(async () => {
+        try {
+          const docsRes = await getAllDocuments(selectedBidderFilter || null, 1, 100);
+          setDocuments(docsRes.items || []);
+        } catch (pollErr) {
+          console.error('OCR polling refresh error:', pollErr);
+        }
+      }, 3000);
+    }
+
+    return () => {
+      if (pollingTimerRef.current) {
+        clearTimeout(pollingTimerRef.current);
+      }
+    };
+  }, [documents, selectedBidderFilter]);
 
   // Handle filter change
   const handleFilterChange = (e) => {
@@ -103,13 +147,12 @@ export default function DocumentsPage() {
     setUploading(true);
     try {
       const result = await uploadDocument(uploadBidderId, uploadFile, uploadDocType);
-      setUploadSuccess(`Successfully uploaded "${result.file_name}" (${result.document_type}).`);
+      setUploadSuccess(`Successfully uploaded "${result.file_name}" (${result.document_type}). OCR processing job queued.`);
       setUploadFile(null);
-      // Reset the file input DOM element if possible
       const fileInput = document.getElementById('document-file-input');
       if (fileInput) fileInput.value = '';
 
-      // Reload document list
+      // Reload document list immediately
       const docsRes = await getAllDocuments(selectedBidderFilter || null, 1, 100);
       setDocuments(docsRes.items || []);
     } catch (err) {
@@ -133,22 +176,85 @@ export default function DocumentsPage() {
     }
   };
 
-  const getDocStatusBadge = (status) => {
-    switch (status) {
-      case 'VERIFIED': return <Badge variant="success">Verified</Badge>;
-      case 'UPLOADED': return <Badge variant="info">Uploaded</Badge>;
-      case 'PENDING': return <Badge variant="warning">Pending</Badge>;
-      case 'REJECTED': return <Badge variant="danger">Rejected</Badge>;
-      default: return <Badge variant="neutral">{status}</Badge>;
+  // Handle View Raw OCR Text
+  const handleViewExtractedText = async (doc) => {
+    setActiveOcrDoc({
+      ...doc,
+      text: doc.ocr_text || null,
+      loading: true,
+    });
+    setOcrModalOpen(true);
+    setOcrLoading(true);
+
+    try {
+      const ocrData = await getDocumentOCR(doc.id);
+      setActiveOcrDoc({
+        ...doc,
+        ocr_status: ocrData.status || ocrData.ocr_status,
+        text: ocrData.text || ocrData.ocr_text || '(No text extracted)',
+        error: ocrData.error || ocrData.ocr_error,
+        completed_at: ocrData.completed_at || ocrData.ocr_completed_at,
+        loading: false,
+      });
+    } catch (err) {
+      setActiveOcrDoc((prev) => ({
+        ...prev,
+        error: err.message || 'Unable to retrieve OCR details',
+        loading: false,
+      }));
+    } finally {
+      setOcrLoading(false);
     }
   };
 
-  const statuses = ['VERIFIED', 'UPLOADED', 'PENDING', 'REJECTED'];
+  // Handle Retry OCR
+  const handleRetryOCR = async (docId) => {
+    setRetryingDocId(docId);
+    try {
+      await retryDocumentOCR(docId);
+      const docsRes = await getAllDocuments(selectedBidderFilter || null, 1, 100);
+      setDocuments(docsRes.items || []);
+    } catch (err) {
+      alert(`Failed to retry OCR: ${err.message}`);
+    } finally {
+      setRetryingDocId(null);
+    }
+  };
+
+  // Controlled OCR Status Badge
+  const getDocStatusBadge = (status) => {
+    const s = (status || '').toUpperCase();
+    switch (s) {
+      case 'OCR_COMPLETED':
+        return <Badge variant="success">✓ OCR Completed</Badge>;
+      case 'OCR_PROCESSING':
+      case 'PROCESSING':
+        return <Badge variant="warning">● OCR Processing</Badge>;
+      case 'QUEUED':
+        return <Badge variant="info">⏳ Queued</Badge>;
+      case 'OCR_FAILED':
+        return <Badge variant="danger">✕ OCR Failed</Badge>;
+      case 'UPLOADED':
+        return <Badge variant="neutral">Uploaded</Badge>;
+      case 'VERIFIED':
+        return <Badge variant="success">Verified</Badge>;
+      default:
+        return <Badge variant="neutral">{s || 'Uploaded'}</Badge>;
+    }
+  };
+
+  // Distinct lifecycle statuses for summary counts
+  const summaryStatuses = [
+    { label: 'Queued', key: 'QUEUED', color: 'var(--color-info)' },
+    { label: 'OCR Processing', key: 'OCR_PROCESSING', color: 'var(--color-warning)' },
+    { label: 'OCR Completed', key: 'OCR_COMPLETED', color: 'var(--color-success)' },
+    { label: 'OCR Failed', key: 'OCR_FAILED', color: 'var(--color-danger)' },
+  ];
 
   return (
     <PageContainer
       title="Documents"
-      subtitle="Uploaded tender documentation and compliance repository files"
+      subtitle="Uploaded tender documentation and compliance repository files with OCR text extraction"
       actions={<Badge variant="info">{documents.length} documents</Badge>}
     >
       {/* Upload Document Section */}
@@ -168,7 +274,7 @@ export default function DocumentsPage() {
               Upload Compliance Document
             </h2>
             <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-              Files are securely stored in private storage with metadata tracked in PostgreSQL.
+              Files are securely stored in private Supabase Storage, and raw text is extracted via the asynchronous OCR pipeline.
             </p>
           </div>
           <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
@@ -311,7 +417,7 @@ export default function DocumentsPage() {
               disabled={uploading}
               style={{ width: '100%' }}
             >
-              {uploading ? 'Uploading to Storage...' : '↑ Upload Document'}
+              {uploading ? 'Uploading to Storage...' : '↑ Upload & Queue OCR'}
             </Button>
           </div>
         </form>
@@ -326,17 +432,16 @@ export default function DocumentsPage() {
           marginBottom: 'var(--space-4)',
         }}
       >
-        {statuses.map((status) => {
-          const count = documents.filter((d) => d.status === status).length;
-          const colors = {
-            VERIFIED: 'var(--color-success)',
-            UPLOADED: 'var(--color-primary)',
-            PENDING: 'var(--color-warning)',
-            REJECTED: 'var(--color-danger)',
-          };
+        {summaryStatuses.map((item) => {
+          const count = documents.filter((d) => {
+            const st = (d.ocr_status || d.status || '').toUpperCase();
+            if (item.key === 'OCR_PROCESSING') return st === 'OCR_PROCESSING' || st === 'PROCESSING';
+            return st === item.key;
+          }).length;
+
           return (
             <div
-              key={status}
+              key={item.key}
               style={{
                 backgroundColor: 'var(--color-bg-card)',
                 border: '1px solid var(--color-border)',
@@ -346,9 +451,9 @@ export default function DocumentsPage() {
               }}
             >
               <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 'var(--space-1)' }}>
-                {status.charAt(0) + status.slice(1).toLowerCase()}
+                {item.label}
               </div>
-              <div style={{ fontSize: 'var(--font-size-2xl)', fontWeight: 'var(--font-weight-bold)', color: colors[status] }}>
+              <div style={{ fontSize: 'var(--font-size-2xl)', fontWeight: 'var(--font-weight-bold)', color: item.color }}>
                 {count}
               </div>
             </div>
@@ -364,7 +469,7 @@ export default function DocumentsPage() {
           title="Unable to load documents"
           description={error}
           actionLabel="Retry"
-          onAction={loadData}
+          onAction={() => loadData(false)}
         />
       ) : (
         <div
@@ -448,68 +553,168 @@ export default function DocumentsPage() {
                     <th style={{ padding: 'var(--space-3) var(--space-4)' }}>Vendor</th>
                     <th style={{ padding: 'var(--space-3) var(--space-4)' }}>Filename</th>
                     <th style={{ padding: 'var(--space-3) var(--space-4)' }}>Size</th>
-                    <th style={{ padding: 'var(--space-3) var(--space-4)' }}>Status</th>
+                    <th style={{ padding: 'var(--space-3) var(--space-4)' }}>OCR Status</th>
                     <th style={{ padding: 'var(--space-3) var(--space-4)' }}>Uploaded Date</th>
                     <th style={{ padding: 'var(--space-3) var(--space-5)', textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {documents.map((doc, index) => (
-                    <tr
-                      key={doc.id}
-                      style={{
-                        borderBottom: index === documents.length - 1 ? 'none' : '1px solid var(--color-border-subtle)',
-                        transition: 'background-color var(--transition-fast)',
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
-                    >
-                      <td style={{ padding: 'var(--space-3) var(--space-5)', fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)' }}>
-                        <Badge variant="neutral">{doc.document_type || doc.type}</Badge>
-                      </td>
-                      <td style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 'var(--font-size-xs)' }}>
-                        {doc.bidder_id || doc.bidderId ? (
-                          <button
-                            type="button"
-                            style={{ background: 'none', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', padding: 0, fontSize: 'var(--font-size-xs)', textAlign: 'left' }}
-                            onClick={() => navigate(`/bidders/${doc.bidder_id || doc.bidderId}`)}
-                          >
-                            {doc.vendor_name || 'View Bidder'}
-                          </button>
-                        ) : (
-                          doc.vendor_name || '—'
-                        )}
-                      </td>
-                      <td style={{ padding: 'var(--space-3) var(--space-4)', fontFamily: 'var(--font-family-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-                        {doc.file_name || doc.filename}
-                      </td>
-                      <td style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-                        {doc.size || '—'}
-                      </td>
-                      <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
-                        {getDocStatusBadge(doc.status)}
-                      </td>
-                      <td style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-                        {doc.uploadedDate || (doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString('en-GB') : '—')}
-                      </td>
-                      <td style={{ padding: 'var(--space-3) var(--space-5)', textAlign: 'right' }}>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          style={{ color: 'var(--color-primary)' }}
-                          onClick={() => handleViewDocument(doc.id)}
-                        >
-                          👁 View / Download
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
+                  {documents.map((doc, index) => {
+                    const ocrStatus = (doc.ocr_status || doc.status || '').toUpperCase();
+                    const isCompleted = ocrStatus === 'OCR_COMPLETED';
+                    const isFailed = ocrStatus === 'OCR_FAILED';
+
+                    return (
+                      <tr
+                        key={doc.id}
+                        style={{
+                          borderBottom: index === documents.length - 1 ? 'none' : '1px solid var(--color-border-subtle)',
+                          transition: 'background-color var(--transition-fast)',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                      >
+                        <td style={{ padding: 'var(--space-3) var(--space-5)', fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)' }}>
+                          <Badge variant="neutral">{doc.document_type || doc.type}</Badge>
+                        </td>
+                        <td style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 'var(--font-size-xs)' }}>
+                          {doc.bidder_id || doc.bidderId ? (
+                            <button
+                              type="button"
+                              style={{ background: 'none', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', padding: 0, fontSize: 'var(--font-size-xs)', textAlign: 'left' }}
+                              onClick={() => navigate(`/bidders/${doc.bidder_id || doc.bidderId}`)}
+                            >
+                              {doc.vendor_name || 'View Bidder'}
+                            </button>
+                          ) : (
+                            doc.vendor_name || '—'
+                          )}
+                        </td>
+                        <td style={{ padding: 'var(--space-3) var(--space-4)', fontFamily: 'var(--font-family-mono)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+                          {doc.file_name || doc.filename}
+                        </td>
+                        <td style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+                          {doc.size || '—'}
+                        </td>
+                        <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                          {getDocStatusBadge(ocrStatus)}
+                        </td>
+                        <td style={{ padding: 'var(--space-3) var(--space-4)', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+                          {doc.uploadedDate || (doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString('en-GB') : '—')}
+                        </td>
+                        <td style={{ padding: 'var(--space-3) var(--space-5)', textAlign: 'right' }}>
+                          <div style={{ display: 'inline-flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+                            {isCompleted && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleViewExtractedText(doc)}
+                                title="View raw extracted text from OCR"
+                              >
+                                📄 View Extracted Text
+                              </Button>
+                            )}
+                            {isFailed && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={retryingDocId === doc.id}
+                                onClick={() => handleRetryOCR(doc.id)}
+                                title="Retry OCR processing"
+                                style={{ borderColor: 'var(--color-danger)', color: 'var(--color-danger)' }}
+                              >
+                                {retryingDocId === doc.id ? 'Retrying...' : '↻ Retry OCR'}
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              style={{ color: 'var(--color-primary)' }}
+                              onClick={() => handleViewDocument(doc.id)}
+                              title="Download original file from Supabase Storage"
+                            >
+                              👁 File
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
         </div>
       )}
+
+      {/* Raw Extracted Text Modal */}
+      <Modal
+        isOpen={ocrModalOpen}
+        onClose={() => setOcrModalOpen(false)}
+        title={`Extracted Raw OCR Text — ${activeOcrDoc?.file_name || 'Document'}`}
+        maxWidth="750px"
+        footer={
+          <Button variant="primary" size="sm" onClick={() => setOcrModalOpen(false)}>
+            Close
+          </Button>
+        }
+      >
+        {ocrLoading ? (
+          <Loading message="Fetching OCR results from database..." />
+        ) : (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)', paddingBottom: 'var(--space-2)', borderBottom: '1px solid var(--color-border)' }}>
+              <div>
+                <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Status: </span>
+                {getDocStatusBadge(activeOcrDoc?.ocr_status)}
+              </div>
+              {activeOcrDoc?.completed_at && (
+                <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+                  Processed: {new Date(activeOcrDoc.completed_at).toLocaleString()}
+                </span>
+              )}
+            </div>
+
+            {activeOcrDoc?.error && (
+              <div
+                style={{
+                  padding: 'var(--space-3)',
+                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid var(--color-danger)',
+                  borderRadius: 'var(--radius-sm)',
+                  color: 'var(--color-danger)',
+                  fontSize: 'var(--font-size-xs)',
+                  marginBottom: 'var(--space-3)',
+                }}
+              >
+                ⚠ {activeOcrDoc.error}
+              </div>
+            )}
+
+            <label style={{ display: 'block', fontSize: 'var(--font-size-xs)', fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-secondary)', marginBottom: 'var(--space-2)' }}>
+              Raw Extracted Text (No LLM applied):
+            </label>
+            <pre
+              style={{
+                backgroundColor: 'var(--color-bg-subtle)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-sm)',
+                padding: 'var(--space-4)',
+                fontFamily: 'var(--font-family-mono)',
+                fontSize: 'var(--font-size-xs)',
+                color: 'var(--color-text-primary)',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                maxHeight: '400px',
+                overflowY: 'auto',
+                lineHeight: 1.6,
+              }}
+            >
+              {activeOcrDoc?.text || '(No OCR text available)'}
+            </pre>
+          </div>
+        )}
+      </Modal>
     </PageContainer>
   );
 }

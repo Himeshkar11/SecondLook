@@ -19,8 +19,13 @@ class Document(Base):
     file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="uploaded")
     uploaded_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ocr_status: Mapped[str | None] = mapped_column(String, nullable=True, default="PENDING")
+    ocr_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ocr_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ocr_completed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     bidder: Mapped["Bidder"] = relationship("Bidder", back_populates="documents")
     verification_jobs: Mapped[list["VerificationJob"]] = relationship("VerificationJob", back_populates="document")
+

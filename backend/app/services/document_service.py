@@ -1,7 +1,7 @@
 """Document service operations for SecondLook.
 
 Handles document validation, secure upload to private Supabase Storage,
-PostgreSQL metadata management, and temporary signed access URLs.
+PostgreSQL metadata management, temporary signed access URLs, and asynchronous OCR lifecycle.
 """
 
 import logging
@@ -20,6 +20,12 @@ from app.config.settings import settings
 from app.database.connection import SessionLocal
 from app.models.bidder import Bidder
 from app.models.document import Document
+from app.workers.jobs import (
+    DocumentOCRJobRecord,
+    DocumentOCRStatus,
+    document_ocr_queue,
+)
+from app.workers.worker import DocumentOCRWorker
 
 logger = logging.getLogger(__name__)
 
@@ -111,8 +117,9 @@ class DocumentService:
         file_name: str = "demo.pdf",
         mime_type: str = "application/pdf",
         file_bytes: Optional[bytes] = None,
+        enqueue_ocr: bool = True,
     ) -> Dict[str, Any]:
-        """Validate, upload to Supabase Storage, and persist metadata in PostgreSQL.
+        """Validate, upload to Supabase Storage, persist metadata in PostgreSQL, and queue OCR.
 
         Supports both real file uploads (file_bytes provided) and deterministic contract-shape
         calls (file_bytes is None) for legacy contract verification.
@@ -129,7 +136,8 @@ class DocumentService:
                 "document_type": document_type,
                 "file_name": file_name,
                 "mime_type": mime_type,
-                "status": "uploaded",
+                "status": "QUEUED",
+                "ocr_status": "QUEUED",
                 "uploaded_at": "2026-09-11T00:00:00Z",
             }
 
@@ -197,7 +205,7 @@ class DocumentService:
             # 7. Upload to Supabase Storage
             self._upload_to_storage(storage_path, file_bytes, normalized_mime)
 
-            # 8. Insert metadata in PostgreSQL
+            # 8. Insert metadata in PostgreSQL with status QUEUED
             now = datetime.now(timezone.utc)
             doc = Document(
                 id=doc_uuid,
@@ -207,7 +215,11 @@ class DocumentService:
                 storage_path=storage_path,
                 mime_type=normalized_mime,
                 file_size=len(file_bytes),
-                status="uploaded",
+                status="QUEUED",
+                ocr_status="QUEUED",
+                ocr_text=None,
+                ocr_error=None,
+                ocr_completed_at=None,
                 uploaded_at=now,
                 created_at=now,
                 updated_at=now,
@@ -222,6 +234,19 @@ class DocumentService:
                 self._delete_from_storage(storage_path)
                 raise
 
+            # 9. Create OCR processing job and enqueue
+            if enqueue_ocr:
+                ocr_job = DocumentOCRJobRecord(
+                    document_id=str(doc.id),
+                    bidder_id=str(doc.bidder_id),
+                    storage_path=doc.storage_path,
+                    file_name=doc.file_name,
+                    mime_type=doc.mime_type,
+                    document_type=doc.document_type,
+                    status=DocumentOCRStatus.QUEUED,
+                )
+                document_ocr_queue.enqueue(ocr_job)
+
             return {
                 "id": str(doc.id),
                 "bidder_id": str(doc.bidder_id),
@@ -231,7 +256,8 @@ class DocumentService:
                 "storage_path": doc.storage_path,
                 "mime_type": doc.mime_type,
                 "file_size": doc.file_size,
-                "status": (doc.status or "UPLOADED").upper(),
+                "status": "QUEUED",
+                "ocr_status": "QUEUED",
                 "uploaded_at": doc.uploaded_at.isoformat() if doc.uploaded_at else None,
             }
         finally:
@@ -273,6 +299,7 @@ class DocumentService:
             items = []
             for d in docs:
                 vendor_name = d.bidder.legal_name if d.bidder else "Unknown Vendor"
+                effective_status = (d.ocr_status or d.status or "UPLOADED").upper()
                 items.append({
                     "id": str(d.id),
                     "bidder_id": str(d.bidder_id),
@@ -286,7 +313,11 @@ class DocumentService:
                     "mime_type": d.mime_type,
                     "file_size": d.file_size,
                     "size": f"{round(d.file_size / 1024, 1)} KB" if d.file_size else "—",
-                    "status": (d.status or "UPLOADED").upper(),
+                    "status": effective_status,
+                    "ocr_status": effective_status,
+                    "has_ocr_text": bool(d.ocr_text),
+                    "ocr_error": d.ocr_error,
+                    "ocr_completed_at": d.ocr_completed_at.isoformat() if d.ocr_completed_at else None,
                     "verifiedBy": "System",
                     "uploaded_at": d.uploaded_at.isoformat() if d.uploaded_at else None,
                     "uploadedDate": d.uploaded_at.strftime("%d %b %Y") if d.uploaded_at else "—",
@@ -325,6 +356,7 @@ class DocumentService:
                 return None
 
             vendor_name = doc.bidder.legal_name if doc.bidder else "Unknown Vendor"
+            effective_status = (doc.ocr_status or doc.status or "UPLOADED").upper()
             return {
                 "id": str(doc.id),
                 "bidder_id": str(doc.bidder_id),
@@ -338,10 +370,84 @@ class DocumentService:
                 "mime_type": doc.mime_type,
                 "file_size": doc.file_size,
                 "size": f"{round(doc.file_size / 1024, 1)} KB" if doc.file_size else "—",
-                "status": (doc.status or "UPLOADED").upper(),
+                "status": effective_status,
+                "ocr_status": effective_status,
+                "ocr_text": doc.ocr_text,
+                "ocr_error": doc.ocr_error,
+                "ocr_completed_at": doc.ocr_completed_at.isoformat() if doc.ocr_completed_at else None,
                 "verifiedBy": "System",
                 "uploaded_at": doc.uploaded_at.isoformat() if doc.uploaded_at else None,
                 "uploadedDate": doc.uploaded_at.strftime("%d %b %Y") if doc.uploaded_at else "—",
+            }
+        finally:
+            if should_close and session is not None:
+                session.close()
+
+    def get_document_ocr(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve OCR processing status, raw extracted text, and safe error information."""
+        doc = self.get_document(document_id)
+        if doc is None:
+            return None
+
+        return {
+            "document_id": doc["id"],
+            "status": doc["ocr_status"],
+            "ocr_status": doc["ocr_status"],
+            "text": doc.get("ocr_text"),
+            "ocr_text": doc.get("ocr_text"),
+            "error": doc.get("ocr_error"),
+            "ocr_error": doc.get("ocr_error"),
+            "completed_at": doc.get("ocr_completed_at"),
+            "ocr_completed_at": doc.get("ocr_completed_at"),
+        }
+
+    def retry_document_ocr(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """Re-queue an OCR job for a failed or stuck document."""
+        try:
+            doc_uuid = uuid.UUID(document_id)
+        except ValueError:
+            return None
+
+        session = self.db
+        should_close = False
+        if session is None and SessionLocal is not None:
+            session = SessionLocal()
+            should_close = True
+
+        if session is None:
+            return None
+
+        try:
+            doc = session.scalar(select(Document).where(Document.id == doc_uuid))
+            if not doc:
+                return None
+
+            doc.ocr_status = "QUEUED"
+            doc.status = "QUEUED"
+            doc.ocr_error = None
+            session.commit()
+
+            job = document_ocr_queue.get_document_job(document_id)
+            if job:
+                job.status = DocumentOCRStatus.QUEUED
+                job.error = None
+                document_ocr_queue.update_job(job)
+            else:
+                job = DocumentOCRJobRecord(
+                    document_id=str(doc.id),
+                    bidder_id=str(doc.bidder_id),
+                    storage_path=doc.storage_path,
+                    file_name=doc.file_name,
+                    mime_type=doc.mime_type,
+                    document_type=doc.document_type,
+                    status=DocumentOCRStatus.QUEUED,
+                )
+                document_ocr_queue.enqueue(job)
+
+            return {
+                "document_id": str(doc.id),
+                "status": "QUEUED",
+                "ocr_status": "QUEUED",
             }
         finally:
             if should_close and session is not None:

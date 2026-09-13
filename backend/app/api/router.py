@@ -9,7 +9,7 @@ queries, CRUD, auth, or verification provider calls.
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -19,6 +19,7 @@ from app.services.bidder_service import BidderService
 from app.services.document_service import DocumentService
 from app.services.tender_service import TenderService
 from app.services.verification_service import VerificationService
+from app.workers.worker import DocumentOCRWorker
 
 logger = logging.getLogger(__name__)
 
@@ -148,21 +149,33 @@ def get_bidder(id: str, db: Session = Depends(get_db)):
 })
 async def upload_bidder_document(
     bidder_id: str,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     document_type: str = Form(...),
     db: Session = Depends(get_db),
 ):
-    """Upload a document for a specific bidder."""
+    """Upload a document for a specific bidder and trigger asynchronous OCR."""
     service = DocumentService(db=db)
     try:
         content = await file.read()
-        return service.upload_document(
+        res = service.upload_document(
             bidder_id=bidder_id,
             file_bytes=content,
             file_name=file.filename or "document.pdf",
             mime_type=file.content_type or "application/pdf",
             document_type=document_type,
         )
+
+        # Dispatch background OCR job asynchronously without blocking HTTP response
+        doc_id = res["id"]
+
+        def _run_ocr_async(d_id: str, f_bytes: bytes):
+            worker = DocumentOCRWorker()
+            worker.process_document_by_id(d_id, content_override=f_bytes)
+
+        background_tasks.add_task(_run_ocr_async, doc_id, content)
+
+        return res
     except KeyError as exc:
         raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": str(exc), "details": {}}}) from exc
     except ValueError as exc:
@@ -214,6 +227,48 @@ def get_document_access(document_id: str, expires_in: int = 3600, db: Session = 
     return access
 
 
+@router.get("/documents/{document_id}/ocr", tags=["Documents"], summary="Get document OCR details", responses={
+    200: {"description": "Document OCR status and raw extracted text."},
+    404: {"description": "Document not found."},
+    500: {"description": "Database query error."}
+})
+def get_document_ocr(document_id: str, db: Session = Depends(get_db)):
+    """Retrieve OCR status and extracted raw text for a document."""
+    service = DocumentService(db=db)
+    try:
+        ocr_info = service.get_document_ocr(document_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": {"code": "DATABASE_ERROR", "message": "Unable to load document OCR details", "details": {}}}) from exc
+    if ocr_info is None:
+        raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Document not found", "details": {}}})
+    return ocr_info
+
+
+@router.post("/documents/{document_id}/ocr/retry", tags=["Documents"], summary="Retry document OCR processing", responses={
+    200: {"description": "Document re-queued for OCR."},
+    404: {"description": "Document not found."},
+    500: {"description": "Database or worker error."}
+})
+def retry_document_ocr(document_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Re-queue an OCR job for a failed or stuck document."""
+    service = DocumentService(db=db)
+    try:
+        res = service.retry_document_ocr(document_id)
+        if res is None:
+            raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Document not found", "details": {}}})
+
+        def _run_retry():
+            worker = DocumentOCRWorker()
+            worker.process_document_by_id(document_id)
+
+        background_tasks.add_task(_run_retry)
+        return res
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": {"code": "RETRY_FAILED", "message": str(exc), "details": {}}}) from exc
+
+
 @router.get("/documents/{document_id}", tags=["Documents"], summary="Get document metadata", responses={
     200: {"description": "Document metadata."},
     404: {"description": "Document not found."},
@@ -229,6 +284,7 @@ def get_document(document_id: str, db: Session = Depends(get_db)):
     if doc is None:
         raise HTTPException(status_code=404, detail={"error": {"code": "RESOURCE_NOT_FOUND", "message": "Document not found", "details": {}}})
     return doc
+
 
 
 @router.post("/documents/upload", tags=["Documents"], summary="Upload a document", status_code=201, responses={
