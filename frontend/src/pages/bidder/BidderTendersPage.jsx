@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import PageContainer from '../../components/layout/PageContainer.jsx';
 import Badge from '../../components/common/Badge.jsx';
 import Button from '../../components/common/Button.jsx';
@@ -7,14 +7,19 @@ import Loading from '../../components/common/Loading.jsx';
 import EmptyState from '../../components/common/EmptyState.jsx';
 import Modal from '../../components/common/Modal.jsx';
 import { getTenders, getTenderById } from '../../services/tenderService.js';
+import { createOrGetTenderBid } from '../../services/bidService.js';
+
 
 export default function BidderTendersPage() {
+  const navigate = useNavigate();
   const [tenders, setTenders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedTender, setSelectedTender] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [startingBid, setStartingBid] = useState(false);
+
 
   const fetchTenders = useCallback(async () => {
     setLoading(true);
@@ -45,6 +50,21 @@ export default function BidderTendersPage() {
       setDetailLoading(false);
     }
   };
+
+  const handleStartBid = async () => {
+    if (!selectedTender) return;
+    setStartingBid(true);
+    try {
+      const bid = await createOrGetTenderBid(selectedTender.id);
+      setSelectedTender(null);
+      navigate(`/bidder/bids/${bid.id}`);
+    } catch (err) {
+      alert(err.message || 'Unable to open bid workspace.');
+    } finally {
+      setStartingBid(false);
+    }
+  };
+
 
   const filteredTenders = tenders.filter((t) => {
     if (!searchQuery) return true;
@@ -258,17 +278,25 @@ export default function BidderTendersPage() {
                     color: 'var(--color-text-primary)',
                   }}
                 >
-                  <strong>Bid Submission Notice (Upcoming Milestone 08):</strong>
+                  <strong>Bid Submission Workspace:</strong>
                   <p style={{ margin: 'var(--space-1) 0 0 0', color: 'var(--color-text-secondary)' }}>
-                    Statutory bid proposal submission and document attachment workflows will be unlocked in Milestone 08. In this milestone, bidders can browse available tenders and inspect requirements.
+                    Prepare your formal statutory proposal, upload compliance certificates, and track automated OCR/AI extraction in a dedicated workspace.
                   </p>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
                   <Button variant="secondary" onClick={() => setSelectedTender(null)}>
                     Close
                   </Button>
+                  <Button
+                    variant="primary"
+                    disabled={startingBid}
+                    onClick={handleStartBid}
+                  >
+                    {startingBid ? 'Opening Workspace...' : 'Start / Open Bid Workspace →'}
+                  </Button>
                 </div>
+
               </div>
             )}
           </Modal>

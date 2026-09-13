@@ -23,6 +23,8 @@ from .compliance import (
     TenderRequirementUpdate,
 )
 
+from .bid import BidCreateRequest, BidDocumentRead, BidRead, BidSubmitResponse
+
 __all__ = [
     "UserCreate",
     "UserRead",
@@ -34,6 +36,10 @@ __all__ = [
     "BidderCreate",
     "BidderProfileResponse",
     "BidderRead",
+    "BidCreateRequest",
+    "BidDocumentRead",
+    "BidRead",
+    "BidSubmitResponse",
     "DocumentCreate",
     "DocumentRead",
     "VerificationJobCreate",

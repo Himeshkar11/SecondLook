@@ -24,9 +24,14 @@ def legacy_contract_auth_compatibility(request):
     Dedicated authorization tests opt out and exercise the real dependencies.
     This fixture never runs in production and does not weaken runtime routes.
     """
-    if request.path.name in {"test_authorization_boundaries.py", "test_bidder_workspace_foundation.py"}:
+    if request.path.name in {
+        "test_authorization_boundaries.py",
+        "test_bidder_workspace_foundation.py",
+        "test_bid_submission_foundation.py",
+    }:
         yield
         return
+
 
     compatibility_user = User(
         id=uuid.UUID("c1111111-1111-1111-1111-111111111111"),

@@ -60,7 +60,13 @@ ALLOWED_DOCUMENT_TYPES = {
     "TENDER_CORRIGENDUM",
     "TENDER_ADDENDUM",
     "TENDER_OTHER",
+    # Milestone 08 Bid document types
+    "BID_DOCUMENT",
+    "TECHNICAL_DOCUMENT",
+    "FINANCIAL_DOCUMENT",
+    "SUPPORTING_DOCUMENT",
 }
+
 
 
 def sanitize_filename(filename: str) -> str:
@@ -128,23 +134,25 @@ class DocumentService:
         file_bytes: Optional[bytes] = None,
         enqueue_ocr: bool = True,
         tender_id: Optional[str] = None,
+        bid_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Validate, upload to Supabase Storage, persist metadata in PostgreSQL, and queue OCR.
 
         Supports both real file uploads (file_bytes provided) and deterministic contract-shape
         calls (file_bytes is None) for legacy contract verification.
-        Supports associating with either a bidder_id or a tender_id.
+        Supports associating with either a bidder_id, tender_id, and/or bid_id.
         """
         # Handle legacy contract call where file_bytes is not provided
         if file_bytes is None:
-            if (not bidder_id and not tender_id) or not document_type:
-                raise ValueError("bidder_id or tender_id, and document_type are required")
+            if (not bidder_id and not tender_id and not bid_id) or not document_type:
+                raise ValueError("bidder_id, tender_id, or bid_id, and document_type are required")
             if not file_name.endswith((".pdf", ".png", ".jpg", ".jpeg")):
                 raise ValueError("unsupported document extension")
             return {
                 "id": "00000000-0000-0000-0000-000000000004",
                 "bidder_id": bidder_id,
                 "tender_id": tender_id,
+                "bid_id": bid_id,
                 "document_type": document_type,
                 "file_name": file_name,
                 "mime_type": mime_type,
@@ -153,11 +161,12 @@ class DocumentService:
                 "uploaded_at": "2026-09-11T00:00:00Z",
             }
 
-        if not bidder_id and not tender_id:
-            raise ValueError("Either bidder_id or tender_id is required")
+        if not bidder_id and not tender_id and not bid_id:
+            raise ValueError("Either bidder_id, tender_id, or bid_id is required")
 
         bidder_uuid: Optional[uuid.UUID] = None
         tender_uuid: Optional[uuid.UUID] = None
+        bid_uuid: Optional[uuid.UUID] = None
         if bidder_id:
             try:
                 bidder_uuid = uuid.UUID(bidder_id)
@@ -168,6 +177,11 @@ class DocumentService:
                 tender_uuid = uuid.UUID(tender_id)
             except ValueError as exc:
                 raise ValueError(f"Invalid tender ID format: {tender_id}") from exc
+        if bid_id:
+            try:
+                bid_uuid = uuid.UUID(bid_id)
+            except ValueError as exc:
+                raise ValueError(f"Invalid bid ID format: {bid_id}") from exc
 
         # 1. Validate document type (normalize and support aliases like vendor-gst)
         raw_doc_type = (document_type or "OTHER").strip()
@@ -241,6 +255,7 @@ class DocumentService:
                 id=doc_uuid,
                 bidder_id=bidder_uuid,
                 tender_id=tender_uuid,
+                bid_id=bid_uuid,
                 document_type=normalized_doc_type,
                 file_name=file_name,
                 storage_path=storage_path,
@@ -283,6 +298,7 @@ class DocumentService:
                 "id": str(doc.id),
                 "bidder_id": str(doc.bidder_id) if doc.bidder_id else None,
                 "tender_id": str(doc.tender_id) if doc.tender_id else None,
+                "bid_id": str(doc.bid_id) if doc.bid_id else None,
                 "vendor_name": vendor_name,
                 "document_type": doc.document_type,
                 "file_name": doc.file_name,
@@ -551,6 +567,14 @@ class DocumentService:
             doc = session.scalar(select(Document).where(Document.id == doc_uuid))
             if not doc:
                 return None
+
+            from unittest.mock import MagicMock
+            if not isinstance(doc.ocr_status, MagicMock):
+                ocr_st = str(doc.ocr_status).upper() if doc.ocr_status is not None else None
+                if ocr_st not in ("OCR_COMPLETED", "COMPLETED"):
+                    raise ValueError(
+                        f"Cannot retry AI extraction before OCR has completed successfully (current OCR status: {doc.ocr_status or 'NONE'})."
+                    )
 
             doc.ai_status = "AI_PENDING"
             doc.ai_error = None

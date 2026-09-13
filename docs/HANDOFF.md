@@ -1,11 +1,23 @@
-# SecondLook Milestone 07 Handoff
+# SecondLook Milestone 08 Handoff
 
 ## Exact Stopping Point
 
-Milestones 02, M3A Authentication Foundation, M3 Role-Based Signup, M4 Backend Role Enforcement, M5 Frontend Role-Based Routing + Navigation, M6 SecondLook Landing Page + 3D Experience, and M7 Bidder Profile + Bidder Workspace are complete. The authenticated bidder workspace shell, verified read-only bidder profile, masked identifier summary, read-only tender discovery, honest placeholder empty states for M8/M9, and secure `GET /api/v1/bidders/me` backend endpoint are implemented and verified. Bid submission and document upload workflows belong to Milestone 08.
+Milestones 01 through 08 are complete. The authenticated bidder workspace, proposal creation, private document upload, asynchronous OCR and structured AI extraction pipeline, statutory government verification integration, transparent processing tracking, and formal bid submission workflows are implemented and verified.
 
+The handoff state is:
+- Bid submission is implemented.
+- Bid document processing is implemented.
+- OCR reuses the existing system (`DocumentOCRWorker`).
+- AI extraction reuses the existing system (`DocumentAIWorker`).
+- Government verification reuses existing providers (`GovernmentVerificationService`, `GovernmentProviderRegistry`).
+- Evidence reuses the existing evidence architecture (`EvidenceResolver`).
+- Audit logging reuses the existing `AuditService` append-only trail.
+- Compliance scoring is NOT implemented (reserved for Milestone 09).
+- Bidder failure explanation is NOT implemented (reserved for Milestone 09).
+- No automatic bidder qualification, approval, rejection, or contract award exists.
 
-The investigation and executed resolution are documented in [docs/M2_BLOCKER_ANALYSIS.md](M2_BLOCKER_ANALYSIS.md). The local rollback snapshot is `m2_reconciliation_snapshot.json` and is intentionally uncommitted.
+Next milestone: Milestone 09 — Bidder Compliance Score + Failure Explanation.
+
 
 ## Repository Structure Discovered
 

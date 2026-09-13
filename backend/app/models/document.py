@@ -13,6 +13,7 @@ class Document(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     bidder_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("bidders.id"), nullable=True)
     tender_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("tenders.id", ondelete="CASCADE"), nullable=True)
+    bid_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("bids.id", ondelete="CASCADE"), nullable=True)
     document_type: Mapped[str] = mapped_column(String, nullable=False)
     file_name: Mapped[str] = mapped_column(String, nullable=False)
     storage_path: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -36,8 +37,7 @@ class Document(Base):
 
     bidder: Mapped["Bidder | None"] = relationship("Bidder", back_populates="documents")
     tender: Mapped["Tender | None"] = relationship("Tender", back_populates="documents")
+    bid: Mapped["Bid | None"] = relationship("Bid", back_populates="documents")
     verification_jobs: Mapped[list["VerificationJob"]] = relationship("VerificationJob", back_populates="document")
     government_verifications: Mapped[list["GovernmentVerification"]] = relationship("GovernmentVerification", back_populates="document", cascade="all, delete-orphan")
-
-
 

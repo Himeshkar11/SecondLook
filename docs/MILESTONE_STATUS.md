@@ -1,7 +1,8 @@
 # SecondLook Milestone Status
 
-Current Milestone: 07 — Bidder Profile + Bidder Workspace
+Current Milestone: 08 — Bid Submission + Bidder Document Workflow
 Status: COMPLETED
+
 
 
 ## What Was Inspected
@@ -55,15 +56,28 @@ Status: COMPLETED
 - `frontend/src/pages/bidder/BidderProfilePage.jsx`
 - `frontend/src/pages/bidder/BidderTendersPage.jsx`
 - `frontend/src/pages/bidder/BidderPlaceholderPage.jsx`
+- `supabase/migrations/20260914_create_bids_table.sql`
+- `backend/app/models/bid.py`
+- `backend/app/schemas/bid.py`
+- `backend/app/services/bid_service.py`
+- `backend/tests/test_bid_submission_foundation.py`
+- `frontend/src/services/bidService.js`
+- `frontend/src/pages/bidder/BidderBidsPage.jsx`
+- `frontend/src/pages/bidder/BidderBidDetailPage.jsx`
+- `frontend/src/pages/bidder/BidderDocumentsPage.jsx`
 
 ## Files Modified
 
 - `backend/app/models/user.py`
 - `backend/app/models/bidder.py`
+- `backend/app/models/tender.py`
+- `backend/app/models/document.py`
 - `backend/app/models/__init__.py`
 - `backend/app/api/router.py`
 - `backend/app/dashboard/router.py`
 - `backend/app/schemas/__init__.py`
+- `backend/app/services/document_service.py`
+- `backend/app/services/bidder_service.py`
 - `frontend/src/auth/AuthContext.jsx`
 - `frontend/src/main.jsx`
 - `frontend/src/App.jsx`
@@ -78,15 +92,17 @@ Status: COMPLETED
 - `backend/tests/test_compliance_orchestration.py`
 - `backend/tests/test_evidence_traceability.py`
 - `backend/tests/test_tender_requirement_management.py`
+- `backend/tests/conftest.py`
 - `docs/RBAC_ARCHITECTURE.md`
 - `docs/MILESTONE_STATUS.md`
 - `docs/HANDOFF.md`
 - `docs/M2_BLOCKER_ANALYSIS.md`
 - `backend/app/schemas/bidder.py`
-- `backend/app/services/bidder_service.py`
 - `frontend/src/api/client.js`
 - `frontend/src/services/bidderService.js`
 - `frontend/src/pages/bidder/BidderWorkspacePage.jsx`
+- `frontend/src/pages/bidder/BidderTendersPage.jsx`
+
 
 
 ## Tests / Checks

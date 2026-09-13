@@ -21,7 +21,11 @@ import SignupPage from './pages/SignupPage.jsx';
 import BidderWorkspacePage from './pages/bidder/BidderWorkspacePage.jsx';
 import BidderProfilePage from './pages/bidder/BidderProfilePage.jsx';
 import BidderTendersPage from './pages/bidder/BidderTendersPage.jsx';
+import BidderBidsPage from './pages/bidder/BidderBidsPage.jsx';
+import BidderBidDetailPage from './pages/bidder/BidderBidDetailPage.jsx';
+import BidderDocumentsPage from './pages/bidder/BidderDocumentsPage.jsx';
 import BidderPlaceholderPage from './pages/bidder/BidderPlaceholderPage.jsx';
+
 
 const LandingPage = React.lazy(() => import('./pages/LandingPage.jsx'));
 
@@ -100,10 +104,12 @@ export default function App() {
         <Route element={<ProtectedRoute allowedRoles={['BIDDER']} />}>
           <Route path="/bidder" element={<BidderWorkspacePage />} />
           <Route path="/bidder/tenders" element={<BidderTendersPage />} />
-          <Route path="/bidder/bids" element={<BidderPlaceholderPage type="bids" />} />
+          <Route path="/bidder/bids" element={<BidderBidsPage />} />
+          <Route path="/bidder/bids/:bidId" element={<BidderBidDetailPage />} />
+          <Route path="/bidder/documents" element={<BidderDocumentsPage />} />
           <Route path="/bidder/compliance" element={<BidderPlaceholderPage type="compliance" />} />
-          <Route path="/bidder/documents" element={<BidderPlaceholderPage type="documents" />} />
           <Route path="/bidder/profile" element={<BidderProfilePage />} />
+
         </Route>
 
         {/* OFFICER Protected Workspace & Namespaced Routes */}

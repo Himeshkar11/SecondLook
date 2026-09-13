@@ -3,6 +3,7 @@ from .user import User
 from .officer_profile import OfficerProfile
 from .tender import Tender
 from .bidder import Bidder
+from .bid import Bid
 from .document import Document
 from .verification_job import VerificationJob
 from .verification_result import VerificationResult
@@ -17,6 +18,7 @@ __all__ = [
     "OfficerProfile",
     "Tender",
     "Bidder",
+    "Bid",
     "Document",
     "VerificationJob",
     "VerificationResult",
@@ -28,4 +30,3 @@ __all__ = [
     "OfficerReview",
     "RequirementReview",
 ]
-

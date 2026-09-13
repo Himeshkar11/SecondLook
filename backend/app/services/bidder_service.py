@@ -241,7 +241,12 @@ class BidderService:
 
             active_tenders_count = len(b.tenders) if b.tenders else 0
             documents_count = len(b.documents) if b.documents else 0
-            submitted_bids_count = 0
+
+            from app.models.bid import Bid
+            submitted_bids_count = session.scalar(
+                select(func.count(Bid.id)).where(Bid.bidder_id == b.id, Bid.status == "SUBMITTED")
+            ) or 0
+
 
             return {
                 "id": b.id,

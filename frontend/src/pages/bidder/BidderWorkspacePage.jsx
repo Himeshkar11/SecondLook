@@ -85,11 +85,12 @@ export default function BidderWorkspacePage() {
         >
           <span style={{ fontSize: '20px', lineHeight: 1 }}>🛡️</span>
           <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-primary)' }}>
-            <strong>Workspace Foundation Active (Milestone 07)</strong>
+            <strong>Workspace &amp; Bid Submissions Active (Milestone 08)</strong>
             <p style={{ margin: 'var(--space-1) 0 0 0', color: 'var(--color-text-secondary)', fontSize: 'var(--font-size-xs)' }}>
-              Your bidder identity and secure workspace are verified. Document upload and bid submissions open in <strong>Milestone 08</strong>; automated compliance evaluation and failure explanations will be active in <strong>Milestone 09</strong>.
+              Your bidder identity, document upload, and bid submission workflows are active. Automated compliance scoring and failure explanations will be enabled in <strong>Milestone 09</strong>.
             </p>
           </div>
+
         </div>
 
         {loading ? (
@@ -342,7 +343,7 @@ export default function BidderWorkspacePage() {
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span style={{ fontSize: '24px' }}>📝</span>
-                    <Badge variant="neutral">Milestone 08</Badge>
+                    <Badge variant="success">Active</Badge>
                   </div>
                   <h3 style={{ margin: 0, fontSize: 'var(--font-size-base)', color: 'var(--color-text-primary)' }}>
                     My Bids
@@ -371,8 +372,9 @@ export default function BidderWorkspacePage() {
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span style={{ fontSize: '24px' }}>📁</span>
-                    <Badge variant="neutral">Milestone 08</Badge>
+                    <Badge variant="success">Active</Badge>
                   </div>
+
                   <h3 style={{ margin: 0, fontSize: 'var(--font-size-base)', color: 'var(--color-text-primary)' }}>
                     Document Repository
                   </h3>

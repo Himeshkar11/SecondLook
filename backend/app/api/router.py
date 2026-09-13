@@ -31,8 +31,11 @@ from app.authz.dependencies import (
 from app.api.deps import get_api_request_context, get_db
 from app.models.user import User
 from app.schemas.bidder import BidderProfileResponse
+from app.schemas.bid import BidCreateRequest, BidDocumentRead, BidRead, BidSubmitResponse
+from app.services.bid_service import BidService
 from app.services.bidder_service import BidderService
 from app.services.document_service import DocumentService
+
 from app.services.government_verification_service import (
     AIExtractionPrerequisiteError,
     GovernmentVerificationService,
@@ -549,7 +552,121 @@ def get_current_bidder_profile(
     return BidderProfileResponse.model_validate(profile)
 
 
+# ---------------------------------------------------------------------------
+# Milestone 08: Authenticated Bidder Bid Submission & Document Workspace
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/bidder/tenders/{tender_id}/bids",
+    response_model=BidRead,
+    tags=["Bidder Bids"],
+    summary="Start or retrieve a tender bid submission workspace",
+    status_code=201,
+)
+def create_or_get_tender_bid(
+    tender_id: str,
+    current_user: User = Depends(require_bidder),
+    db: Session = Depends(get_db),
+):
+    """Start or open a draft bid workspace for a tender. Idempotent."""
+    try:
+        t_uuid = UUID(tender_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail={"error": {"code": "VALIDATION_ERROR", "message": "Invalid tender ID format."}})
+    service = BidService(db=db)
+    return service.get_or_create_bid(current_user.id, t_uuid)
+
+
+@router.get(
+    "/bidder/bids",
+    response_model=list[BidRead],
+    tags=["Bidder Bids"],
+    summary="List all bids belonging to the authenticated bidder",
+)
+def list_my_bids(
+    current_user: User = Depends(require_bidder),
+    db: Session = Depends(get_db),
+):
+    """List all bids created by the authenticated bidder."""
+    service = BidService(db=db)
+    return service.list_bids_for_user(current_user.id)
+
+
+@router.get(
+    "/bidder/bids/{bid_id}",
+    response_model=BidRead,
+    tags=["Bidder Bids"],
+    summary="Get bid workspace details and document statuses",
+)
+def get_my_bid(
+    bid_id: str,
+    current_user: User = Depends(require_bidder),
+    db: Session = Depends(get_db),
+):
+    """Retrieve details for a specific bid owned by the authenticated bidder."""
+    try:
+        b_uuid = UUID(bid_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail={"error": {"code": "VALIDATION_ERROR", "message": "Invalid bid ID format."}})
+    service = BidService(db=db)
+    return service.get_bid_for_user(current_user.id, b_uuid)
+
+
+@router.post(
+    "/bidder/bids/{bid_id}/documents",
+    tags=["Bidder Bids", "Documents"],
+    summary="Upload document to a draft bid workspace",
+    status_code=201,
+)
+async def upload_bid_document(
+    bid_id: str,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    document_type: str = Form(...),
+    current_user: User = Depends(require_bidder),
+    db: Session = Depends(get_db),
+):
+    """Upload a document to a draft bid workspace and dispatch OCR/AI workers."""
+    try:
+        b_uuid = UUID(bid_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail={"error": {"code": "VALIDATION_ERROR", "message": "Invalid bid ID format."}})
+    service = BidService(db=db)
+    return await service.upload_bid_document(
+        current_user_id=current_user.id,
+        bid_id=b_uuid,
+        file=file,
+        document_type=document_type,
+        background_tasks=background_tasks,
+    )
+
+
+@router.post(
+    "/bidder/bids/{bid_id}/submit",
+    response_model=BidSubmitResponse,
+    tags=["Bidder Bids"],
+    summary="Formally submit a bid for evaluation",
+)
+def submit_bid(
+    bid_id: str,
+    current_user: User = Depends(require_bidder),
+    db: Session = Depends(get_db),
+):
+    """Formally submit a bid proposal.
+
+    Submission locks the bid and registers it for evaluation.
+    It does NOT qualify, approve, reject, or award the bid.
+    """
+    try:
+        b_uuid = UUID(bid_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail={"error": {"code": "VALIDATION_ERROR", "message": "Invalid bid ID format."}})
+    service = BidService(db=db)
+    return service.submit_bid(current_user.id, b_uuid)
+
+
 @router.get("/bidders/{id}", tags=["Bidders"], summary="Get own bidder profile", responses={
+
     200: {"description": "Bidder response."},
     404: {"description": "Bidder not found."},
     500: {"description": "Database query error."}
@@ -920,6 +1037,11 @@ def retry_document_ai(
 
         background_tasks.add_task(_run_ai_retry)
         return res
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "OCR_PREREQUISITE_NOT_MET", "message": str(exc), "details": {}}},
+        ) from exc
     except HTTPException:
         raise
     except Exception as exc:

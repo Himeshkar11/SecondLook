@@ -29,6 +29,7 @@ class Tender(Base):
 
     creator: Mapped["User"] = relationship("User", back_populates="tenders")
     bidders: Mapped[list["Bidder"]] = relationship("Bidder", secondary="tender_bidders", back_populates="tenders")
+    bids: Mapped[list["Bid"]] = relationship("Bid", back_populates="tender", cascade="all, delete-orphan")
     requirements: Mapped[list["TenderRequirement"]] = relationship("TenderRequirement", back_populates="tender", cascade="all, delete-orphan")
     documents: Mapped[list["Document"]] = relationship("Document", back_populates="tender", cascade="all, delete-orphan")
     compliance_evaluations: Mapped[list["ComplianceEvaluation"]] = relationship("ComplianceEvaluation", back_populates="tender", cascade="all, delete-orphan")

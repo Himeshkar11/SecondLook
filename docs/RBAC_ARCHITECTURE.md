@@ -492,7 +492,50 @@ Backend Ownership Boundary (GET /api/v1/bidders/me)
 
 ### Strict Boundaries Maintained:
 - Bidder workspace foundation is implemented.
-- Actual bid submission is NOT implemented (Milestone 08).
-- Bidder document upload/processing is NOT implemented (Milestone 08).
+- Bidder document upload and bid submission are implemented in Milestone 08.
 - Bidder compliance scoring is NOT implemented (Milestone 09).
 - Officer dashboard is NOT implemented.
+
+## Milestone 08 Bid Submission + Bidder Document Workflow Architecture
+
+Milestone 08 implements formal tender bid submission workspaces and secure document processing for authenticated bidders:
+
+```text
+Login / Authenticated Identity
+         ↓
+Application User (Role = 'BIDDER')
+         ↓
+Bidder Profile (bidders.user_id == users.id)
+         ↓
+Bid Submission Workspace (bids.bidder_id == bidders.id)
+   ├── Status: DRAFT / SUBMITTED
+   ├── Attached Documents (documents.bid_id == bids.id)
+   │     ├── Upload to Private Supabase Storage
+   │     ├── Asynchronous OCR Processing (DocumentOCRWorker)
+   │     ├── Structured AI Extraction (DocumentAIWorker)
+   │     ├── Statutory Verification (GovernmentVerificationService)
+   │     └── Evidence Ingestion (EvidenceResolver)
+   └── Formal Submission Action (POST /api/v1/bidder/bids/{id}/submit)
+         └── Audit Trail (AuditService: BID_SUBMITTED)
+```
+
+### 1. Bid Entity & Lifecycle
+- Entity: SQLAlchemy model `Bid` mapped to `bids` table with unique constraint `(bidder_id, tender_id)`.
+- Lifecycle:
+  - `DRAFT`: Bid workspace open for file attachments, OCR processing, and proposal preparation.
+  - `SUBMITTED`: Bid formally locked and registered for evaluation.
+- Decision Separation: Submitting a bid records the bidder's formal participation and timestamps. It does **NOT** approve, qualify, reject, or award the bid, and does not calculate compliance scores.
+
+### 2. Multi-Tenant Bid Ownership & Security
+- Identity Resolution: Ownership is derived exclusively via `current_user.id -> Bidder.user_id -> Bid.bidder_id`.
+- Cross-Bidder Isolation: Bidder A cannot view, submit, or upload documents to Bidder B's bid (returns HTTP 403 Forbidden). Parameter tampering via request body or URL headers is rejected.
+- Role Boundary: Officers receive HTTP 403 on bidder self-service bid endpoints; unauthenticated callers receive HTTP 401.
+- Document Access: Download URLs are short-lived signed URLs generated through `GET /api/v1/documents/{id}/access`, strictly enforced by `require_document_access`.
+
+### 3. Reused Protected Systems
+- Document Storage: Private Supabase Storage bucket via `DocumentService._upload_to_storage`.
+- OCR Pipeline: Asynchronous queue via `DocumentOCRWorker` with retry endpoint.
+- AI Extraction: Schema-governed extraction via `DocumentAIWorker` with retry endpoint.
+- Government Verification: Statutory verification via `GovernmentVerificationService` and `GovernmentProviderRegistry`.
+- Evidence Architecture: Discovered documents and verified statutory records feed directly into `EvidenceResolver`.
+- Audit Logging: Append-only event tracking in `audit_logs` table via `AuditService` (`BID_CREATED`, `BID_DOCUMENT_UPLOADED`, `BID_SUBMITTED`).
