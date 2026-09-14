@@ -115,7 +115,7 @@ export default function LandingPage() {
                 }}
               >
                 <Link
-                  to="/signup?role=bidder"
+                  to="/signup"
                   style={{
                     padding: 'var(--space-3) var(--space-5)',
                     borderRadius: 'var(--radius-sm)',
@@ -136,7 +136,7 @@ export default function LandingPage() {
                 </Link>
 
                 <Link
-                  to="/signup?role=officer"
+                  to="/signup"
                   style={{
                     padding: 'var(--space-3) var(--space-5)',
                     borderRadius: 'var(--radius-sm)',

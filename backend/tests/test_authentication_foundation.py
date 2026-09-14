@@ -11,10 +11,10 @@ from starlette.requests import Request
 
 from app.auth.dependencies import get_bearer_token
 from app.auth.service import SupabaseAuthConfigurationError, SupabaseAuthService
+from app.config.settings import Settings, settings
 from app.main import app
 from app.models.base import Base
 from app.models.user import User
-from app.config.settings import settings
 
 
 AUTH_USER_ID = uuid.UUID("a1111111-1111-1111-1111-111111111111")
@@ -62,6 +62,19 @@ def test_invalid_supabase_token_is_rejected(monkeypatch):
 
     assert exc_info.value.status_code == 401
     assert "token" not in str(exc_info.value.detail).lower()
+
+
+def test_service_role_key_is_supported_for_server_side_admin_usage():
+    instance = Settings(
+        supabase_url="",
+        supabase_key="",
+        supabase_service_role_key="service-role-key",
+        vite_supabase_url="https://auth.example.test",
+        vite_supabase_publishable_key="site-key",
+    )
+
+    assert instance.supabase_key == "service-role-key"
+    assert instance.supabase_service_role_key == "service-role-key"
 
 
 def test_missing_supabase_configuration_fails_safely(monkeypatch):

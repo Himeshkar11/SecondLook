@@ -35,9 +35,9 @@ The intended layering is Router -> Service -> Repository/Database/Integration. T
 
 | Question | Finding | Evidence |
 |---|---|---|
-| Login | M3A provides a minimal Supabase Auth email/password flow at `/login`. | `frontend/src/App.jsx`, `frontend/src/pages/LoginPage.jsx` |
-| Signup | Not present. | No signup page, service, or route found. |
-| Supabase Auth | Used for password verification and session lifecycle; no service-role key is exposed to the browser. | `frontend/src/auth/supabaseClient.js`, `backend/app/auth/service.py` |
+| Login | Supabase Auth email/password login is the normal authentication flow at `/login`. | `frontend/src/App.jsx`, `frontend/src/pages/LoginPage.jsx` |
+| Signup | Supabase Auth signup is the canonical account-creation flow, and the current demo/development configuration intentionally disables email confirmation. | `frontend/src/auth/AuthContext.jsx`, `frontend/src/pages/SignupPage.jsx` |
+| Supabase Auth | Used for password verification, session lifecycle, and bearer-token validation; no service-role key is exposed to the browser. | `frontend/src/auth/supabaseClient.js`, `backend/app/auth/service.py` |
 | FastAPI authentication | M3A validates bearer credentials through Supabase Auth and M4 resolves roles and ownership through centralized dependencies. | `backend/app/auth/dependencies.py`, `backend/app/authz/dependencies.py`, `backend/app/api/router.py` |
 | JWT | No JWT library, token parser, or bearer dependency found. | `backend/requirements.txt`, backend auth search |
 | Session authentication | No application session or cookie authentication found. | Backend and frontend auth search |

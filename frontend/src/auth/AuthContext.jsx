@@ -129,6 +129,9 @@ export function AuthProvider({ children }) {
     },
     async signUp({ email, password, role: signupRole, fullName, legalName, registrationNumber, gstNumber, panNumber }) {
       if (!supabase) throw new Error('Authentication is not configured for this environment.');
+      if (signupRole !== 'BIDDER' && signupRole !== 'OFFICER') {
+        throw new Error('Invalid account type selected.');
+      }
       const { data, error } = await supabase.auth.signUp({ email, password });
       if (error) {
         if (error.code === 'user_already_exists' || error.status === 422) {
@@ -138,7 +141,7 @@ export function AuthProvider({ children }) {
       }
 
       if (!data.session) {
-        throw new Error('Check your email to confirm the account. Application profile setup requires a confirmed session.');
+        throw new Error('Signup completed but no authenticated session was returned. Please try again.');
       }
 
       try {

@@ -218,6 +218,17 @@ def test_officer_dashboard_bidder_returns_403(officer_dashboard_context):
     assert response.status_code == 403
 
 
+def test_bidder_role_headers_and_query_parameters_do_not_escalate(officer_dashboard_context):
+    _, identities, _, _, _, _, _, _, _, _ = officer_dashboard_context
+    response = request_as(
+        identities["bidder"],
+        "get",
+        "/api/v1/officer/dashboard?role=OFFICER&user_id=00000000-0000-0000-0000-000000000001",
+        headers={"X-Role": "OFFICER"},
+    )
+    assert response.status_code == 403
+
+
 def test_officer_dashboard_officer_returns_200(officer_dashboard_context):
     _, identities, _, _, _, _, _, _, _, _ = officer_dashboard_context
     response = request_as(identities["officer"], "get", "/api/v1/officer/dashboard")

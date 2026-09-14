@@ -85,6 +85,22 @@ def test_bidder_signup_requires_company_name(session):
     assert session.query(User).count() == 0
 
 
+def test_signup_provisioning_does_not_depend_on_email_confirmation_state(session):
+    request = SignupProvisionRequest(
+        role="BIDDER",
+        full_name="No Confirmation Applicant",
+        legal_name="No Confirmation Ltd",
+    )
+
+    result = SignupProvisioningService().provision(session, auth_user("confirm-none@example.test"), request)
+
+    created_user = session.get(User, result.user_id)
+    assert created_user.role == "BIDDER"
+    assert created_user.auth_user_id == result.auth_user_id
+    assert created_user.bidder_profile is not None
+    assert created_user.officer_profile is None
+
+
 def test_duplicate_auth_identity_is_rejected_without_duplicate_profile(session):
     auth = auth_user("duplicate@example.test")
     first_request = SignupProvisionRequest(

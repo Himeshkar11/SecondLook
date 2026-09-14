@@ -25,10 +25,15 @@ class Settings(BaseSettings):
 
     environment: str = Field(default="development", alias="ENVIRONMENT")
     api_base_url: str = Field(default="http://localhost:8000", alias="API_BASE_URL")
+    cors_allowed_origins: str = Field(
+        default="http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173",
+        alias="CORS_ALLOWED_ORIGINS",
+    )
 
     database_url: str = Field(default="", alias="DATABASE_URL")
     supabase_url: str = Field(default="", alias="SUPABASE_URL")
     supabase_key: str = Field(default="", alias="SUPABASE_KEY")
+    supabase_service_role_key: str = Field(default="", alias="SUPABASE_SERVICE_ROLE_KEY")
     vite_supabase_url: str = Field(default="", alias="VITE_SUPABASE_URL")
     vite_supabase_publishable_key: str = Field(default="", alias="VITE_SUPABASE_PUBLISHABLE_KEY")
 
@@ -70,6 +75,8 @@ class Settings(BaseSettings):
     def model_post_init(self, __context) -> None:
         if not self.supabase_url and self.vite_supabase_url:
             self.supabase_url = self.vite_supabase_url
+        if not self.supabase_key and self.supabase_service_role_key:
+            self.supabase_key = self.supabase_service_role_key
         if not self.supabase_key and self.vite_supabase_publishable_key:
             self.supabase_key = self.vite_supabase_publishable_key
         if not self.openrouter_api_key and self.ai_api_key:

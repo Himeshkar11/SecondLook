@@ -1,23 +1,36 @@
-# SecondLook Milestone 10 Handoff
+# SecondLook Final Handoff
 
 ## Exact Stopping Point
 
-Milestones 01 through 10 are complete. The authenticated officer operations dashboard, aggregate procurement metrics, operational tender tracking, itemized attention notices, tender evaluation workflow navigation, and integration with the Task 16 officer review panel are implemented and verified.
+The project has reached the final documented freeze gate for the current product milestone.
 
 The handoff state is:
-- Single-pass server-side aggregation: `GET /api/v1/officer/dashboard` protected by `require_officer`.
-- Officer-to-tender scope: canonical `OFFICER` role only. No officer assignment, department scope, or tender ownership link exists, so all canonical officers currently see all tenders returned by the aggregation. This is a known global-access limitation; direct tender-ID changes are not a separate authorization boundary.
-- `GET /api/v1/officer/dashboard` is the sole canonical all-tender officer dashboard endpoint. The obsolete `/api/v1/dashboard/summary` route was removed after confirming there were no active frontend or backend runtime callers and that its legacy field names were misleading.
-- Mandatory attention notices are derived from evaluated requirement IDs joined to the existing `TenderRequirement.mandatory` flag. Optional failures do not produce `MANDATORY_ISSUE`; no compliance or decision semantics changed.
-- M10 remediation completed without changing RBAC architecture, officer scope, or Tasks 11-20 authority boundaries.
-- Overview counts: Active Tenders, Total Tenders, Bids Received, Evaluations Pending, and Reviews Requiring Attention.
-- Operational Tenders table: Live tracking of reference number, title, status, bids count, evaluated bidder count, evaluation progress, attention required badges, and 1-click links to Tender Details / Requirements (`/officer/tenders/:id`) and Tender Evaluation Workflow (`/officer/tenders/:id/dashboard`).
-- Actionable Attention Notices: Flagged items for pending evaluations, failed evaluations, failed mandatory requirements, and uncompleted officer reviews with severity badges (`danger`, `warning`, `info`) and direct drill-down action links.
-- Tender Workflow Page (`TenderWorkflowPage.jsx`): Linked with `onOpenBidder` callback navigating directly to `BidderDetailPage.jsx` and Task 16 `OfficerReviewPanel`.
-- Strict Decision Safety: Compliance scores are informational decision support tools. All qualification, rejection, and award determinations require explicit officer decision-making. No automated qualification, rejection, ranking, or winner selection logic exists.
-- All changes are UNCOMMITTED in the working tree (`NOT COMMITTED`).
+- Security and RBAC enforcement for the milestone scope are verified and documented in [docs/RBAC_SECURITY_MATRIX.md](RBAC_SECURITY_MATRIX.md).
+- The backend regression suite has passed: 437 tests passed, 1 warning.
+- The frontend production build has passed: `npm run build` succeeded.
+- The working tree is free of diff-check errors.
+- The M11 security posture is complete: backend-authenticated authorization remains the authoritative boundary, with explicit trusted CORS origins and protected API resource checks.
+- The current architecture is intentionally preserved. No broad refactoring or redesign was introduced during the remediation pass.
+- Browser automation and live database verification remain blocked by environment availability rather than by a code-level pass claim.
+- This is a demo-freeze state, not a request to redesign the system or begin unrelated milestone work.
 
-Next milestone: Milestone 11.
+Next milestone: Milestone 12 — full product integration and demo freeze. This gate is only valid if the complete matrix remains green and environment-dependent validation is clearly marked as blocked instead of passed.
+
+## Final Security Status
+
+- Backend RBAC is authoritative; frontend routing is UX-only.
+- Trusted CORS origins are explicitly configured, not wildcarded.
+- Sensitive routes are protected by backend role/ownership validation.
+- Public endpoints remain minimal and not security-critical.
+- Global officer scope remains a known architecture limitation until a dedicated officer-to-tender model is introduced.
+- No new feature work or architecture restructuring should proceed without a specific requirement-driven justification.
+
+## Demo Freeze Guidance
+
+- Do not broaden the scope beyond genuine defect fixes or demo-blocking issues.
+- Do not start unrelated milestone work.
+- Capture any future improvement ideas in the handoff documentation rather than changing product behavior during the demo pass.
+- Explicitly mark browser and database checks as BLOCKED when the environment is not available.
 
 
 ## Repository Structure Discovered
@@ -69,9 +82,9 @@ No Alembic directory or `pyproject.toml` was found. Database schema changes are 
 
 ## Current Authentication State
 
-Supabase Auth is the authentication provider. The frontend uses the official Supabase client for email/password login, persisted sessions, refresh, auth-state changes, and logout. The backend validates bearer credentials through Supabase Auth `/auth/v1/user` and resolves the Auth UUID through `users.auth_user_id`. `/api/v1/auth/me` returns the linked active application identity.
+Supabase Auth remains the authentication provider. The frontend uses the official Supabase client for email/password login and signup, persisted sessions, refresh, auth-state changes, and logout. The backend validates bearer credentials through Supabase Auth `/auth/v1/user` and resolves the Auth UUID through `users.auth_user_id`. `/api/v1/auth/me` returns the linked active application identity.
 
-Role-based signup now uses Supabase Auth followed by authenticated `/api/v1/auth/provision`. M4 adds centralized `require_role`, bidder ownership, and document access dependencies. No frontend route guard exists. An authenticated Supabase identity that has no explicit application-user mapping receives a safe error from `/auth/me`; it is not auto-provisioned outside the signup provisioning flow.
+SecondLook uses Supabase Auth with email/password authentication. Email confirmation is intentionally disabled for the current demo/development configuration. Authorization is enforced independently through backend RBAC using the canonical `BIDDER` and `OFFICER` roles. The signup flow uses the standard Supabase Auth signup call and then provisions the application user through the authenticated `/api/v1/auth/provision` endpoint. No custom email-confirmation bypass or custom JWT layer is introduced.
 
 The local `users` table and SQLAlchemy `User` model are application records with historical `id`, nullable `auth_user_id`, email, full name, free-form role, active flag, and timestamps. The role default is legacy `admin`; tests create `procurement_officer`. The frontend `/login` route uses Supabase Auth, and the header displays the authenticated email with logout. Theme preference is separate from Supabase session persistence.
 

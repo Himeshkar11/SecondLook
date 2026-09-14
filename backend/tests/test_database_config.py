@@ -5,10 +5,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from fastapi.testclient import TestClient
 
-from app.config.settings import settings
 from app.database.repository import select_one
 from app.main import app
 from app.services.tender_service import TenderService
+from app.config.settings import settings
 from app.services.bidder_service import BidderService
 from app.services.document_service import DocumentService
 from app.services.verification_service import VerificationService
@@ -17,6 +17,33 @@ from app.services.verification_service import VerificationService
 def test_settings_module_imports_and_defaults():
     assert settings.environment == "development"
     assert settings.api_base_url == "http://localhost:8000"
+
+
+def test_cors_does_not_allow_wildcard_with_credentials():
+    assert "*" not in settings.cors_allowed_origins
+    assert "http://localhost:5173" in settings.cors_allowed_origins
+
+
+def test_cors_preflight_allows_configured_frontend_and_rejects_untrusted_origin():
+    client = TestClient(app)
+    allowed = client.options(
+        "/api/v1/auth/me",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    untrusted = client.options(
+        "/api/v1/auth/me",
+        headers={
+            "Origin": "https://untrusted.example",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert allowed.status_code == 200
+    assert allowed.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    assert untrusted.status_code == 400
 
 
 def test_database_probe_returns_one_for_configured_database_url():
