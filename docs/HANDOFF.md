@@ -1,22 +1,23 @@
-# SecondLook Milestone 09 Handoff
+# SecondLook Milestone 10 Handoff
 
 ## Exact Stopping Point
 
-Milestones 01 through 09 are complete. The authenticated bidder workspace, proposal creation, private document upload, asynchronous OCR and structured AI extraction pipeline, statutory government verification integration, transparent processing tracking, formal bid submission workflows, and bidder compliance score visibility layer with failure explanations are implemented and verified.
+Milestones 01 through 10 are complete. The authenticated officer operations dashboard, aggregate procurement metrics, operational tender tracking, itemized attention notices, tender evaluation workflow navigation, and integration with the Task 16 officer review panel are implemented and verified.
 
 The handoff state is:
-- Bidder compliance visibility is implemented.
-- Deterministic compliance scoring formula is implemented (`applicable = total - not_applicable`, `score = (passed / applicable) * 100.0`).
-- Factual failure/partial/unverified explanations and actionable remediation guidance are implemented.
-- Secure evidence traceability with signed document access is implemented.
-- Evaluation run history audit trail is implemented.
-- Prominent statutory disclaimers are enforced across UI and backend API responses.
-- Backend RBAC and bidder ownership are authoritative (`HTTP 403` on mismatch).
-- No duplicate compliance engine, evidence resolver, or evaluation models created.
-- No officer review logic mutated; no automatic qualification, disqualification, ranking, or award.
+- Single-pass server-side aggregation: `GET /api/v1/officer/dashboard` protected by `require_officer`.
+- Officer-to-tender scope: canonical `OFFICER` role only. No officer assignment, department scope, or tender ownership link exists, so all canonical officers currently see all tenders returned by the aggregation. This is a known global-access limitation; direct tender-ID changes are not a separate authorization boundary.
+- `GET /api/v1/officer/dashboard` is the sole canonical all-tender officer dashboard endpoint. The obsolete `/api/v1/dashboard/summary` route was removed after confirming there were no active frontend or backend runtime callers and that its legacy field names were misleading.
+- Mandatory attention notices are derived from evaluated requirement IDs joined to the existing `TenderRequirement.mandatory` flag. Optional failures do not produce `MANDATORY_ISSUE`; no compliance or decision semantics changed.
+- M10 remediation completed without changing RBAC architecture, officer scope, or Tasks 11-20 authority boundaries.
+- Overview counts: Active Tenders, Total Tenders, Bids Received, Evaluations Pending, and Reviews Requiring Attention.
+- Operational Tenders table: Live tracking of reference number, title, status, bids count, evaluated bidder count, evaluation progress, attention required badges, and 1-click links to Tender Details / Requirements (`/officer/tenders/:id`) and Tender Evaluation Workflow (`/officer/tenders/:id/dashboard`).
+- Actionable Attention Notices: Flagged items for pending evaluations, failed evaluations, failed mandatory requirements, and uncompleted officer reviews with severity badges (`danger`, `warning`, `info`) and direct drill-down action links.
+- Tender Workflow Page (`TenderWorkflowPage.jsx`): Linked with `onOpenBidder` callback navigating directly to `BidderDetailPage.jsx` and Task 16 `OfficerReviewPanel`.
+- Strict Decision Safety: Compliance scores are informational decision support tools. All qualification, rejection, and award determinations require explicit officer decision-making. No automated qualification, rejection, ranking, or winner selection logic exists.
 - All changes are UNCOMMITTED in the working tree (`NOT COMMITTED`).
 
-Next milestone: Milestone 10 — Officer Review & Disqualification Workflow.
+Next milestone: Milestone 11.
 
 
 ## Repository Structure Discovered
@@ -392,20 +393,26 @@ The authenticated bidder experience is implemented:
 - Evaluation run history table tracking immutable audit trail of past runs.
 - Cross-bidder access denied with HTTP 403; officer access to bidder compliance endpoints denied with HTTP 403; unauthenticated access denied with HTTP 401.
 - Focused M9 tests: `11 passed`.
-- Full backend regression: `422 passed, 1 warning`.
+## M10 Officer Dashboard
+- Single-pass server-side aggregation: `GET /api/v1/officer/dashboard` protected by `require_officer`.
+- Overview counts: Active Tenders, Total Tenders, Bids Received, Evaluations Pending, and Reviews Requiring Attention.
+- Operational Tenders table: Live tracking of reference number, title, status, bids count, evaluated bidder count, evaluation progress, attention required badges, and 1-click links to Tender Details / Requirements (`/officer/tenders/:id`) and Tender Evaluation Workflow (`/officer/tenders/:id/dashboard`).
+- Actionable Attention Notices: Flagged items for pending evaluations, failed evaluations, failed mandatory requirements, and uncompleted officer reviews with severity badges (`danger`, `warning`, `info`) and direct drill-down action links.
+- Tender Workflow Page (`TenderWorkflowPage.jsx`): Linked with `onOpenBidder` callback navigating directly to `BidderDetailPage.jsx` and Task 16 `OfficerReviewPanel`.
+- Strict Decision Safety: Compliance scores are informational decision support tools. All qualification, rejection, and award determinations require explicit officer decision-making. No automated qualification, rejection, ranking, or winner selection logic exists.
+- Focused M10 tests: `11 passed`.
+- Full backend regression: `433 passed, 1 warning`.
 - Frontend build: `npm run build` passed cleanly.
 
-BIDDER COMPLIANCE SCORE AND FAILURE EXPLANATION IS IMPLEMENTED.
-
-OFFICER REVIEW AND DISQUALIFICATION WORKFLOW IS NOT IMPLEMENTED.
+OFFICER DASHBOARD IS IMPLEMENTED.
 
 NOT COMMITTED (WORKING TREE CHANGES ONLY).
 
-MILESTONE 10 NOT STARTED.
+MILESTONE 11 NOT STARTED.
 
 ## Next Milestone Instructions
 
-Milestone 10 is **Officer Review & Disqualification Workflow**.
+Milestone 11
 
 AUTHENTICATION IS IMPLEMENTED.
 
@@ -423,7 +430,9 @@ BID SUBMISSION + DOCUMENT PIPELINE IS IMPLEMENTED.
 
 BIDDER COMPLIANCE SCORE + EXPLANATIONS ARE IMPLEMENTED.
 
-Do NOT start Milestone 10 before review.
+OFFICER DASHBOARD IS IMPLEMENTED.
+
+Do NOT start Milestone 11 before review.
 Do NOT commit working tree changes.
-Do NOT modify officer review logic during M9 handoff.
-Do NOT auto-disqualify or rank bidders.
+Do NOT create duplicate compliance or review systems.
+Do NOT auto-qualify, auto-reject, rank, or award bidders.

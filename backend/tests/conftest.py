@@ -28,6 +28,7 @@ def legacy_contract_auth_compatibility(request):
         "test_authorization_boundaries.py",
         "test_bidder_workspace_foundation.py",
         "test_bid_submission_foundation.py",
+        "test_officer_dashboard_foundation.py",
     }:
         yield
         return

@@ -103,22 +103,6 @@ def request_as(identity, method, path, **kwargs):
         app.dependency_overrides.pop(get_authenticated_identity, None)
 
 
-def test_missing_authentication_is_rejected_at_officer_boundary(authorization_context):
-    response = TestClient(app).get("/api/v1/dashboard/summary")
-
-    assert response.status_code == 401
-
-
-def test_officer_boundary_allows_officer_and_denies_bidder(authorization_context):
-    _, identities, _, _, _, _ = authorization_context
-
-    officer_response = request_as(identities["officer"], "get", "/api/v1/dashboard/summary")
-    bidder_response = request_as(identities["bidder_a"], "get", "/api/v1/dashboard/summary")
-
-    assert officer_response.status_code == 200
-    assert bidder_response.status_code == 403
-
-
 def test_bidder_ownership_allows_only_matching_authenticated_user(authorization_context):
     _, identities, bidder_a, bidder_b, _, _ = authorization_context
 
@@ -154,27 +138,6 @@ def test_document_by_id_is_limited_to_owner_or_officer(authorization_context):
     assert officer_response.status_code == 200
 
 
-def test_role_query_header_and_user_id_manipulation_do_not_escalate(authorization_context):
-    _, identities, _, _, _, _ = authorization_context
-
-    response = request_as(
-        identities["bidder_a"],
-        "get",
-        "/api/v1/dashboard/summary?role=OFFICER&user_id=00000000-0000-0000-0000-000000000001",
-        headers={"X-Role": "OFFICER"},
-    )
-
-    assert response.status_code == 403
-
-
-def test_legacy_role_is_not_silently_treated_as_officer(authorization_context):
-    _, identities, _, _, _, _ = authorization_context
-
-    response = request_as(identities["legacy"], "get", "/api/v1/dashboard/summary")
-
-    assert response.status_code == 403
-
-
 @pytest.mark.parametrize(
     "path",
     [
@@ -190,7 +153,6 @@ def test_legacy_role_is_not_silently_treated_as_officer(authorization_context):
         "/api/v1/evidence/00000000-0000-0000-0000-000000000001",
         "/api/v1/audit/events",
         "/api/v1/verification/00000000-0000-0000-0000-000000000001",
-        "/api/v1/dashboard/summary",
     ],
 )
 def test_sensitive_routes_reject_missing_authentication(path):

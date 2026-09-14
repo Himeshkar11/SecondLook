@@ -122,6 +122,7 @@ export default function App() {
           <Route path="/officer/tenders/:id" element={<TenderDetailPage />} />
           <Route path="/officer/tenders/:id/dashboard" element={<TenderWorkflowPage />} />
           <Route path="/officer/tenders/:id/workflow" element={<TenderWorkflowPage />} />
+          <Route path="/officer/tenders/:id/bidders" element={<TenderWorkflowPage />} />
           <Route path="/officer/bidders" element={<BiddersPage />} />
           <Route path="/officer/bidders/:id" element={<BidderDetailPage />} />
           <Route path="/officer/evaluations" element={<VerificationPage />} />
@@ -135,6 +136,7 @@ export default function App() {
           <Route path="/tenders/:id" element={<TenderDetailPage />} />
           <Route path="/tenders/:id/dashboard" element={<TenderWorkflowPage />} />
           <Route path="/tenders/:id/workflow" element={<TenderWorkflowPage />} />
+          <Route path="/tenders/:id/bidders" element={<TenderWorkflowPage />} />
           <Route path="/bidders" element={<BiddersPage />} />
           <Route path="/bidders/:id" element={<BidderDetailPage />} />
           <Route path="/documents" element={<DocumentsPage />} />

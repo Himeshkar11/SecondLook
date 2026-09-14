@@ -30,6 +30,12 @@ from .bidder_compliance import (
     BidderComplianceSummary,
     BidderComplianceViewResponse,
 )
+from .officer_dashboard import (
+    OfficerAttentionItem,
+    OfficerDashboardOverview,
+    OfficerDashboardResponse,
+    OfficerTenderRow,
+)
 
 __all__ = [
     "UserCreate",
@@ -71,5 +77,8 @@ __all__ = [
     "BidderComplianceSummary",
     "BidderComplianceViewResponse",
     "BidderComplianceHistoryItem",
+    "OfficerDashboardOverview",
+    "OfficerTenderRow",
+    "OfficerAttentionItem",
+    "OfficerDashboardResponse",
 ]
-

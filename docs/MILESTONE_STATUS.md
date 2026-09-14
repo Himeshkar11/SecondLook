@@ -1,6 +1,6 @@
 # SecondLook Milestone Status
 
-Current Milestone: 09 — Bidder Compliance Score + Failure Explanation
+Current Milestone: 10 — Officer Dashboard
 Status: COMPLETED
 
 
@@ -21,9 +21,12 @@ Status: COMPLETED
 - A local `users` table/model exists with constrained canonical `BIDDER` and `OFFICER` roles alongside temporary legacy compatibility values.
 - `bidders.user_id` links bidder records to `users.id` and is unique; `users.auth_user_id` is a nullable unique Supabase identity mapping.
 - `officer_profiles` is the existing one-to-one officer profile foundation. No bid submission table exists; `tender_bidders` is the current tender/bidder association.
+- Officer-to-tender authorization is currently global for canonical `OFFICER` users: there is no assignment table, department scope, or tender-level officer link. The M10 dashboard therefore does not claim per-officer tender assignments; direct tender-ID access is governed by the officer role only. This limitation must be resolved explicitly before fine-grained officer scope is required.
 - Frontend routes enforce centralized ProtectedRoute guards with canonical BIDDER and OFFICER namespaces and role-aware navigation implemented in M5.
 - Documents, evidence, evaluations, reviews, audit events, and processing endpoints are protected by centralized ownership and role dependencies.
 - Existing OCR, AI, government verification, evidence, compliance, review, audit, worker, Storage, and Task 17/19/20 systems are established protected systems.
+- M10 dashboard aggregation is server-side and batch-oriented. `GET /api/v1/officer/dashboard` is the sole canonical all-tenders overview; the obsolete `/api/v1/dashboard/summary` route was removed because no active runtime consumer remained and its legacy field names had misleading semantics.
+- M10 remediation filters `MANDATORY_ISSUE` notices through the existing evaluated requirement relationship and canonical `TenderRequirement.mandatory` flag. Optional failures do not create mandatory attention notices. No RBAC architecture or Task 11-20 authority boundary changed.
 
 ## Files Created
 
@@ -68,6 +71,8 @@ Status: COMPLETED
 - `backend/app/schemas/bidder_compliance.py`
 - `backend/tests/test_bidder_compliance_visibility.py`
 - `frontend/src/pages/bidder/BidderBidCompliancePage.jsx`
+- `backend/app/schemas/officer_dashboard.py`
+- `backend/tests/test_officer_dashboard_foundation.py`
 
 ## Files Modified
 
@@ -351,21 +356,32 @@ Milestone 09 implements the read-only bidder compliance visibility layer:
 - Full backend regression: `422 passed, 1 warning`.
 - Frontend build: `npm run build` passed cleanly.
 
-BIDDER COMPLIANCE SCORE AND FAILURE EXPLANATION IS IMPLEMENTED.
+## M10 — Officer Dashboard
 
-OFFICER REVIEW AND DISQUALIFICATION WORKFLOW IS NOT IMPLEMENTED.
+Milestone 10 implements the authenticated officer operational dashboard and procurement oversight:
+- Single-pass server-side aggregation: `GET /api/v1/officer/dashboard` protected by `require_officer`.
+- Overview counts: Active Tenders, Total Tenders, Bids Received, Evaluations Pending, and Reviews Requiring Attention.
+- Operational Tenders table: Live tracking of reference number, title, status, bids count, evaluated bidder count, evaluation progress, attention required badges, and 1-click links to Tender Details / Requirements (`/officer/tenders/:id`) and Tender Evaluation Workflow (`/officer/tenders/:id/dashboard`).
+- Actionable Attention Notices: Flagged items for pending evaluations, failed evaluations, failed mandatory requirements, and uncompleted officer reviews with severity badges (`danger`, `warning`, `info`) and direct drill-down action links.
+- Tender Workflow Page (`TenderWorkflowPage.jsx`): Linked with `onOpenBidder` callback navigating directly to `BidderDetailPage.jsx` and Task 16 `OfficerReviewPanel`.
+- Strict Decision Safety: Compliance scores are informational decision support tools. All qualification, rejection, and award determinations require explicit officer decision-making. No automated qualification, rejection, ranking, or winner selection logic exists.
+- Focused M10 tests: `11 passed`.
+- Full backend regression: `433 passed, 1 warning`.
+- Frontend build: `npm run build` passed cleanly.
+
+OFFICER DASHBOARD IS IMPLEMENTED.
 
 NOT COMMITTED (WORKING TREE CHANGES ONLY).
 
-MILESTONE 10 NOT STARTED.
+MILESTONE 11 NOT STARTED.
 
 ## Next Milestone
 
-Milestone 10 — Officer Review & Disqualification Workflow
+Milestone 11
 
 ## STRICT DO NOT
 
-- start Milestone 10 before review
+- start Milestone 11 before review
 - commit working tree changes
-- modify officer review or evaluation engine
-- auto-disqualify or rank bidders
+- create duplicate compliance or review systems
+- auto-qualify, auto-reject, rank, or award bidders

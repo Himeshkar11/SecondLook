@@ -234,7 +234,9 @@ For officer access, the current schema only proves tender creation through `tend
 - an explicit officer-to-tender assignment table; or
 - an organization/department authorization model.
 
-Until that decision exists, officer access should be treated as `OFFICER` plus explicit tender authorization, not as global access to every tender.
+The M10 implementation has not introduced any of those scope models. `OfficerProfile` is only a one-to-one profile record and contains no authorization fields. Therefore current officer dashboard and tender workflow access is `OFFICER` role only: every canonical officer can view every tender returned by the aggregation. This is a documented global-officer limitation, not an assignment model; direct tender-ID changes do not create a cross-tender authorization boundary until an explicit assignment or organization-scope model is designed and implemented.
+
+M10 remediation keeps `GET /api/v1/officer/dashboard` as the sole canonical all-tender officer dashboard endpoint. The obsolete `/api/v1/dashboard/summary` compatibility route was removed after verifying that no frontend or backend runtime consumer remained; its misleading legacy field names are no longer part of the API surface. This remediation did not change the RBAC architecture or global officer scope.
 
 Cross-resource checks must include:
 

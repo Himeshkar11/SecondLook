@@ -7,3 +7,7 @@ export function getTenderDashboard(tenderId) {
 export function getTenderDashboardRequirements(tenderId) {
   return apiClient(`/api/v1/tenders/${encodeURIComponent(tenderId)}/dashboard/requirements`);
 }
+
+export function getOfficerDashboardOverview() {
+  return apiClient('/api/v1/officer/dashboard');
+}

@@ -6,6 +6,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
+from app.models.bid import Bid
 from app.models.tender import Tender
 from app.models.tender_requirement import ComplianceEvaluation, RequirementEvaluation, TenderRequirement
 from app.review.models import OfficerReview, RequirementReview
@@ -24,8 +25,26 @@ class DashboardRepository:
         except (ValueError, AttributeError):
             statement = select(Tender).where(Tender.reference_number == tender_id)
         return self.db.execute(
-            statement.options(joinedload(Tender.bidders), joinedload(Tender.requirements))
+            statement.options(
+                joinedload(Tender.bidders),
+                joinedload(Tender.requirements),
+                joinedload(Tender.bids).joinedload(Bid.bidder),
+            )
         ).unique().scalars().first()
+
+    def get_all_tenders(self) -> list[Tender]:
+        return list(
+            self.db.execute(
+                select(Tender)
+                .options(
+                    joinedload(Tender.bidders),
+                    joinedload(Tender.requirements),
+                    joinedload(Tender.bids).joinedload(Bid.bidder),
+                )
+                .order_by(Tender.created_at.desc())
+            ).unique().scalars().all()
+        )
+
 
     def get_evaluations(self, tender_id: uuid.UUID) -> list[ComplianceEvaluation]:
         return list(self.db.execute(

@@ -33,6 +33,8 @@ from app.models.user import User
 from app.schemas.bidder import BidderProfileResponse
 from app.schemas.bid import BidCreateRequest, BidDocumentRead, BidRead, BidSubmitResponse
 from app.schemas.bidder_compliance import BidderComplianceHistoryItem, BidderComplianceViewResponse
+from app.schemas.officer_dashboard import OfficerDashboardResponse
+from app.dashboard.service import DashboardService
 from app.services.bid_service import BidService
 from app.services.bidder_service import BidderService
 from app.services.document_service import DocumentService
@@ -1236,22 +1238,22 @@ def get_verification(
     return verification
 
 
-@router.get("/dashboard/summary", tags=["Dashboard"], summary="Dashboard summary", responses={
-    200: {"description": "High-level dashboard placeholder response."}
-})
-def get_dashboard_summary(
-    _officer=Depends(require_officer),
-):
-    """Contract placeholder for GET /api/v1/dashboard/summary.
+@router.get(
+    "/officer/dashboard",
+    response_model=OfficerDashboardResponse,
+    tags=["Officer Dashboard"],
+    summary="Get operational officer dashboard overview and authorized tenders",
+)
+def get_officer_dashboard_endpoint(
+    current_user: User = Depends(require_officer),
+    db: Session = Depends(get_db),
+) -> OfficerDashboardResponse:
+    """Retrieve operational metrics, authorized tender summaries, and itemized attention notices.
 
-    No live statistics are computed in M10.
+    Protected by require_officer. Bidders and unauthenticated users are rejected.
     """
-    return {
-        "total_tenders": 0,
-        "total_bidders": 0,
-        "pending_verifications": 0,
-        "verified_documents": 0,
-    }
+    service = DashboardService(db=db)
+    return service.get_officer_dashboard_overview(officer_user_id=current_user.id)
 
 
 @router.get("/audit/{id}", tags=["Audit"], summary="Get audit information", responses={

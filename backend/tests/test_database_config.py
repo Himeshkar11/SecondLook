@@ -48,7 +48,6 @@ def test_contract_openapi_routes_are_declared_and_docs_endpoints_still_exist():
         "POST /api/v1/documents/upload": "/api/v1/documents/upload",
         "POST /api/v1/verification/start": "/api/v1/verification/start",
         "GET /api/v1/verification/{id}": "/api/v1/verification/{id}",
-        "GET /api/v1/dashboard/summary": "/api/v1/dashboard/summary",
         "GET /api/v1/audit/{id}": "/api/v1/audit/{id}",
     }
 

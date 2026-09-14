@@ -183,9 +183,6 @@ def test_bidder_cannot_access_officer_endpoints(bidder_workspace_context):
     resp_tender_bidders = request_as(identities["bidder_a"], "get", f"/api/v1/tenders/{tender.id}/bidders")
     assert resp_tender_bidders.status_code == 403
 
-    resp_summary = request_as(identities["bidder_a"], "get", "/api/v1/dashboard/summary")
-    assert resp_summary.status_code == 403
-
 
 def test_new_bidder_empty_counts_are_zero(bidder_workspace_context):
     _, identities, _, _, bidder_c, _, _, _ = bidder_workspace_context
