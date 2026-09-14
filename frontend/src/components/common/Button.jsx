@@ -21,10 +21,11 @@ export default function Button({
     fontFamily: 'inherit',
     fontWeight: 'var(--font-weight-medium)',
     borderRadius: 'var(--radius-sm)',
-    transition: 'background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast)',
+    transition: 'background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast)',
     cursor: disabled ? 'not-allowed' : 'pointer',
     opacity: disabled ? 0.6 : 1,
     border: '1px solid transparent',
+    boxShadow: 'none',
   };
 
   const sizes = {
@@ -54,6 +55,11 @@ export default function Button({
     secondary: {
       backgroundColor: 'var(--color-bg-card)',
       color: 'var(--color-text-primary)',
+      borderColor: 'var(--color-border)',
+    },
+    outline: {
+      backgroundColor: 'transparent',
+      color: 'var(--color-primary)',
       borderColor: 'var(--color-border)',
     },
     success: {

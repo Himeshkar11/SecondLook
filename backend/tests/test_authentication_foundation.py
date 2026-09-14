@@ -126,6 +126,28 @@ def test_unmapped_or_inactive_application_user_is_rejected(session, monkeypatch)
     assert exc_info.value.status_code == 403
 
 
+def test_missing_application_user_is_lazy_provisioned_from_signup_metadata(session, monkeypatch):
+    monkeypatch.setattr(settings, "supabase_url", "https://auth.example.test")
+    monkeypatch.setattr(settings, "supabase_key", "public-key")
+
+    identity = SupabaseAuthService(http_client=mock_client(payload={
+        "id": str(AUTH_USER_ID),
+        "email": "provisioned@example.test",
+        "user_metadata": {
+            "role": "BIDDER",
+            "full_name": "Provisioned User",
+            "legal_name": "Provisioned Co",
+        },
+    })).resolve_application_identity(session, "access-token")
+
+    created_user = session.query(User).filter_by(auth_user_id=AUTH_USER_ID).one()
+    assert identity.auth_user_id == AUTH_USER_ID
+    assert identity.application_user.id == created_user.id
+    assert created_user.role == "BIDDER"
+    assert created_user.email == "provisioned@example.test"
+    assert created_user.bidder_profile is not None
+
+
 def test_missing_bearer_token_is_rejected():
     request = Request({"type": "http", "headers": []})
 

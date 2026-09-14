@@ -40,6 +40,7 @@ export default function SignupPage() {
     panNumber: '',
   });
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const updateField = (field) => (event) => {
@@ -63,6 +64,7 @@ export default function SignupPage() {
   const submit = async (event) => {
     event.preventDefault();
     setError('');
+    setSuccessMessage('');
     if (!role) {
       setError('Please select an account type.');
       return;
@@ -78,7 +80,7 @@ export default function SignupPage() {
 
     setIsSubmitting(true);
     try {
-      await signUp({
+      const signupResult = await signUp({
         email: form.email.trim(),
         password: form.password,
         role,
@@ -88,6 +90,12 @@ export default function SignupPage() {
         gstNumber: role === 'BIDDER' ? form.gstNumber : null,
         panNumber: role === 'BIDDER' ? form.panNumber : null,
       });
+
+      if (signupResult?.requiresEmailConfirmation) {
+        setSuccessMessage('Account created. Check your email to confirm your address, then sign in to continue.');
+        return;
+      }
+
       navigate(role === 'BIDDER' ? '/bidder' : '/officer');
     } catch (signupError) {
       setError(signupError.message);
@@ -194,6 +202,11 @@ export default function SignupPage() {
           {error && (
             <p role="alert" style={{ color: 'var(--color-danger)', fontSize: 'var(--font-size-sm)' }}>
               {error}
+            </p>
+          )}
+          {successMessage && (
+            <p role="status" style={{ color: 'var(--color-success)', fontSize: 'var(--font-size-sm)' }}>
+              {successMessage}
             </p>
           )}
 

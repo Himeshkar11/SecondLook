@@ -69,6 +69,7 @@ from app.models.document import Document
 from app.models.tender_requirement import TenderRequirement
 from app.schemas.auth import (
     AuthenticatedApplicationUserRead,
+    OfficerInviteProvisionRequest,
     SignupProvisionRequest,
     SignupProvisionResponse,
 )
@@ -112,10 +113,11 @@ def provision_application_user(
     auth_user: SupabaseAuthUser = Depends(get_supabase_auth_user),
     db: Session = Depends(get_db),
 ):
-    """Create exactly one role-specific application profile after Auth signup.
+    """Create a bidder profile after Auth signup.
 
-    This endpoint creates identity/profile records only. It does not grant
-    access to existing business APIs or enforce role authorization.
+    Officer accounts are intentionally prohibited from this public path to
+    prevent self-service privilege escalation. Officer onboarding must use the
+    trusted invite-based route below.
     """
     if db is None:
         return JSONResponse(
@@ -123,6 +125,32 @@ def provision_application_user(
             content={"detail": "Application identity service is unavailable."},
         )
     return SignupProvisioningService().provision(db, auth_user, payload)
+
+
+@router.post(
+    "/auth/officer/provision",
+    response_model=SignupProvisionResponse,
+    status_code=201,
+    tags=["Authentication"],
+    summary="Create an OFFICER account from a trusted server-issued invite token",
+)
+def provision_officer_account_via_invite(
+    payload: OfficerInviteProvisionRequest,
+    auth_user: SupabaseAuthUser = Depends(get_supabase_auth_user),
+    db: Session = Depends(get_db),
+):
+    """Create an officer profile only after validating a signed server token.
+
+    The invite token is issued by the backend using a server secret and contains
+    the invited email plus expiry. This prevents a user from self-selecting the
+    OFFICER role via client-controlled signup metadata.
+    """
+    if db is None:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Application identity service is unavailable."},
+        )
+    return SignupProvisioningService().provision_officer_with_invite(db, auth_user, payload)
 
 
 @router.get("/health/database", tags=["Health"], summary="Database health check", responses={

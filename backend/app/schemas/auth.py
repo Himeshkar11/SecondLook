@@ -17,12 +17,19 @@ class AuthenticatedApplicationUserRead(BaseModel):
 
 
 class SignupProvisionRequest(BaseModel):
-    role: Literal["BIDDER", "OFFICER"]
+    role: Literal["BIDDER"]
     full_name: str = Field(min_length=1, max_length=255)
     legal_name: str | None = Field(default=None, max_length=255)
     registration_number: str | None = Field(default=None, max_length=255)
     gst_number: str | None = Field(default=None, max_length=255)
     pan_number: str | None = Field(default=None, max_length=255)
+
+    @field_validator("role")
+    @classmethod
+    def restrict_signup_role(cls, value: str) -> str:
+        if value != "BIDDER":
+            raise ValueError("Officer accounts must be created through a trusted server-side invite flow.")
+        return value
 
     @field_validator("full_name")
     @classmethod
@@ -39,6 +46,21 @@ class SignupProvisionRequest(BaseModel):
             return None
         normalized = value.strip()
         return normalized or None
+
+
+class OfficerInviteProvisionRequest(BaseModel):
+    invite_token: str = Field(min_length=1, max_length=2000)
+    full_name: str | None = Field(default=None, max_length=255)
+
+    @field_validator("full_name")
+    @classmethod
+    def normalize_full_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Full name is required.")
+        return normalized
 
 
 class SignupProvisionResponse(BaseModel):

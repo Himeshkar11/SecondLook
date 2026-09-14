@@ -1,14 +1,8 @@
 /**
  * SecondLook Design Tokens
- * 
+ *
  * Minimal Indian Government / Enterprise Portal Theme
- * Palette subtle inspiration:
- * - Gov Green: #138808 (compliant, verified, success)
- * - Saffron: #FF9933 (pending, warning, attention)
- * - Deep Blue: #1E4E8C (primary actions, links, active navigation)
- * - Red: #D32F2F (failure, non-compliant, high risk)
- * 
- * Supports complete application-wide Light & Dark Themes
+ * Stronger on trust, clarity, and legibility than generic AI template styling.
  */
 
 :root {
@@ -16,29 +10,26 @@
   --gov-blue: #1E4E8C;
   --gov-blue-hover: #153B6D;
   --gov-blue-subtle: #EBF2FA;
-  
+
   --gov-green: #138808;
   --gov-green-hover: #0E6606;
   --gov-green-subtle: #EDF7EC;
-  
+
   --gov-saffron: #D97706;
   --gov-saffron-bright: #FF9933;
   --gov-saffron-subtle: #FFF8EB;
-  
+
   --gov-red: #D32F2F;
   --gov-red-hover: #B71C1C;
   --gov-red-subtle: #FDF2F2;
 
-  /* ================================================= */
-  /* LIGHT THEME TOKENS (Default)                      */
-  /* ================================================= */
   --color-primary: var(--gov-blue);
   --color-primary-hover: var(--gov-blue-hover);
   --color-primary-subtle: var(--gov-blue-subtle);
 
   --color-success: var(--gov-green);
   --color-success-subtle: var(--gov-green-subtle);
-  
+
   --color-warning: var(--gov-saffron);
   --color-warning-subtle: var(--gov-saffron-subtle);
 
@@ -49,15 +40,15 @@
   --color-info-subtle: var(--gov-blue-subtle);
 
   /* Neutrals & Surfaces */
-  --color-bg-page: #F8FAFC;
+  --color-bg-page: #F5F7FA;
   --color-bg-card: #FFFFFF;
   --color-bg-header: #FFFFFF;
   --color-bg-sidebar: #FFFFFF;
-  --color-bg-subtle: #F1F5F9;
+  --color-bg-subtle: #EEF3F8;
   --color-bg-hover: #F8FAFC;
 
-  --color-border: #E2E8F0;
-  --color-border-subtle: #F1F5F9;
+  --color-border: #DDE5EE;
+  --color-border-subtle: #EEF3F8;
   --color-border-focus: #1E4E8C;
 
   --color-text-primary: #0F172A;
@@ -65,50 +56,44 @@
   --color-text-muted: #64748B;
   --color-text-inverse: #FFFFFF;
 
-  /* Typography */
   --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-family-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-  --font-size-xs: 0.75rem;     /* 12px */
-  --font-size-sm: 0.875rem;    /* 14px */
-  --font-size-base: 1rem;      /* 16px */
-  --font-size-lg: 1.125rem;    /* 18px */
-  --font-size-xl: 1.25rem;     /* 20px */
-  --font-size-2xl: 1.5rem;     /* 24px */
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.25rem;
+  --font-size-2xl: 1.5rem;
 
   --font-weight-normal: 400;
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
   --font-weight-bold: 700;
 
-  /* Spacing Grid (4px based) */
-  --space-1: 0.25rem;  /* 4px */
-  --space-2: 0.5rem;   /* 8px */
-  --space-3: 0.75rem;  /* 12px */
-  --space-4: 1rem;     /* 16px */
-  --space-5: 1.25rem;  /* 20px */
-  --space-6: 1.5rem;   /* 24px */
-  --space-8: 2rem;     /* 32px */
-  --space-10: 2.5rem;  /* 40px */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
 
-  /* Border Radii */
   --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-full: 9999px;
 
-  /* Shadows */
-  --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.08), 0 1px 2px -1px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
+  --shadow-xs: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
+  --shadow-sm: 0 3px 8px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 10px 18px rgba(15, 23, 42, 0.08);
 
-  /* Layout Proportions */
   --header-height: 60px;
   --sidebar-width: 240px;
   --max-content-width: 1200px;
 
-  /* Transitions */
   --transition-fast: 150ms ease-in-out;
 }
 

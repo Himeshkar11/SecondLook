@@ -5,6 +5,21 @@ import { supabase, supabaseAuthConfigured } from './supabaseClient.js';
 export const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
+  const waitForSupabaseSession = async (timeoutMs = 10000) => {
+    if (!supabase) return null;
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.access_token) {
+        return data.session;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+
+    return null;
+  };
+
   const [session, setSession] = useState(null);
   const [user, setUser] = useState(null);
   const [applicationUser, setApplicationUser] = useState(null);
@@ -125,14 +140,33 @@ export function AuthProvider({ children }) {
       if (!supabase) throw new Error('Authentication is not configured for this environment.');
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw new Error('Authentication failed. Check your email and password.');
-      return data;
+
+      const activeSession = data.session ?? await waitForSupabaseSession();
+      if (!activeSession) {
+        throw new Error('Authentication succeeded but the session is not ready yet. Please try again.');
+      }
+
+      return { ...data, session: activeSession };
     },
     async signUp({ email, password, role: signupRole, fullName, legalName, registrationNumber, gstNumber, panNumber }) {
       if (!supabase) throw new Error('Authentication is not configured for this environment.');
       if (signupRole !== 'BIDDER' && signupRole !== 'OFFICER') {
         throw new Error('Invalid account type selected.');
       }
-      const { data, error } = await supabase.auth.signUp({ email, password });
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            role: signupRole,
+            full_name: fullName,
+            legal_name: legalName || null,
+            registration_number: registrationNumber || null,
+            gst_number: gstNumber || null,
+            pan_number: panNumber || null,
+          },
+        },
+      });
       if (error) {
         if (error.code === 'user_already_exists' || error.status === 422) {
           throw new Error('An account with this email already exists.');
@@ -140,14 +174,23 @@ export function AuthProvider({ children }) {
         throw new Error('Unable to create the authentication account. Please try again.');
       }
 
-      if (!data.session) {
+      if (data.user && !data.session) {
+        return {
+          user: data.user,
+          session: null,
+          requiresEmailConfirmation: true,
+        };
+      }
+
+      const activeSession = data.session ?? await waitForSupabaseSession();
+      if (!activeSession) {
         throw new Error('Signup completed but no authenticated session was returned. Please try again.');
       }
 
       try {
-        return await apiClient('/api/v1/auth/provision', {
+        const provisionedUser = await apiClient('/api/v1/auth/provision', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${data.session.access_token}` },
+          headers: { Authorization: `Bearer ${activeSession.access_token}` },
           body: JSON.stringify({
             role: signupRole,
             full_name: fullName,
@@ -157,6 +200,10 @@ export function AuthProvider({ children }) {
             pan_number: panNumber || null,
           }),
         });
+        return {
+          ...provisionedUser,
+          requiresEmailConfirmation: false,
+        };
       } catch (provisionError) {
         await supabase.auth.signOut();
         throw new Error(provisionError.message || 'Unable to create your application profile. Please try again.');

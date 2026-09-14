@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     supabase_url: str = Field(default="", alias="SUPABASE_URL")
     supabase_key: str = Field(default="", alias="SUPABASE_KEY")
     supabase_service_role_key: str = Field(default="", alias="SUPABASE_SERVICE_ROLE_KEY")
+    officer_invite_secret: str = Field(default="", alias="OFFICER_INVITE_SECRET")
     vite_supabase_url: str = Field(default="", alias="VITE_SUPABASE_URL")
     vite_supabase_publishable_key: str = Field(default="", alias="VITE_SUPABASE_PUBLISHABLE_KEY")
 

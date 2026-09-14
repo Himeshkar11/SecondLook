@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.auth.service import SupabaseAuthUser
 from app.auth.dependencies import get_supabase_auth_user
+from app.config.settings import settings
 from app.database.repository import get_db
 from app.main import app
 from app.models.base import Base
@@ -56,15 +57,25 @@ def test_bidder_signup_creates_only_bidder_profile(session):
     assert user.officer_profile is None
 
 
-def test_officer_signup_creates_only_officer_profile(session):
-    request = SignupProvisionRequest(role="OFFICER", full_name="Officer Applicant")
+def test_public_signup_rejects_officer_role_even_when_requested(session):
+    request = SignupProvisionRequest.model_validate({
+        "role": "BIDDER",
+        "full_name": "Officer Applicant",
+        "legal_name": "Officer Applicant Ltd",
+    })
+    assert request.role == "BIDDER"
 
-    result = SignupProvisioningService().provision(session, auth_user("officer@example.test"), request)
+    with pytest.raises(ValidationError):
+        SignupProvisionRequest.model_validate({
+            "role": "OFFICER",
+            "full_name": "Officer Applicant",
+        })
 
-    user = session.get(User, result.user_id)
-    assert user.role == "OFFICER"
-    assert user.officer_profile.user_id == user.id
-    assert user.bidder_profile is None
+    with pytest.raises(ValidationError):
+        SignupProvisionRequest.model_validate({
+            "role": "ADMIN",
+            "full_name": "Officer Applicant",
+        })
 
 
 def test_signup_rejects_every_non_canonical_role():
@@ -104,8 +115,9 @@ def test_signup_provisioning_does_not_depend_on_email_confirmation_state(session
 def test_duplicate_auth_identity_is_rejected_without_duplicate_profile(session):
     auth = auth_user("duplicate@example.test")
     first_request = SignupProvisionRequest(
-        role="OFFICER",
+        role="BIDDER",
         full_name="First Applicant",
+        legal_name="First Applicant Ltd",
     )
     SignupProvisioningService().provision(session, auth, first_request)
 
@@ -119,8 +131,8 @@ def test_duplicate_auth_identity_is_rejected_without_duplicate_profile(session):
 
     assert exc_info.value.status_code == 409
     assert session.query(User).count() == 1
-    assert session.query(OfficerProfile).count() == 1
-    assert session.query(Bidder).count() == 0
+    assert session.query(OfficerProfile).count() == 0
+    assert session.query(Bidder).count() == 1
 
 
 def test_duplicate_email_is_rejected(session):
@@ -128,12 +140,55 @@ def test_duplicate_email_is_rejected(session):
     session.add(User(email=auth.email, full_name="Existing", role="OFFICER"))
     session.commit()
 
-    request = SignupProvisionRequest(role="OFFICER", full_name="Applicant")
+    request = SignupProvisionRequest(role="BIDDER", full_name="Applicant", legal_name="Applicant Ltd")
     with pytest.raises(HTTPException) as exc_info:
         SignupProvisioningService().provision(session, auth, request)
 
     assert exc_info.value.status_code == 409
     assert session.query(User).count() == 1
+
+
+def test_officer_invite_provisioning_allows_signed_officer_account(session, monkeypatch):
+    monkeypatch.setattr(settings, "officer_invite_secret", "test-officer-secret")
+
+    invite = SignupProvisioningService.generate_officer_invite_token("officer-invite@example.test")
+    result = SignupProvisioningService().provision_officer_with_invite(
+        session,
+        auth_user("officer-invite@example.test"),
+        type("Req", (), {"invite_token": invite, "full_name": "Invited Officer"})(),
+    )
+
+    user = session.get(User, result.user_id)
+    assert user.role == "OFFICER"
+    assert user.email == "officer-invite@example.test"
+    assert user.officer_profile is not None
+    assert user.bidder_profile is None
+
+
+def test_officer_invite_rejects_wrong_email_and_expired_token(session, monkeypatch):
+    monkeypatch.setattr(settings, "officer_invite_secret", "test-officer-secret")
+
+    wrong_email_token = SignupProvisioningService.generate_officer_invite_token("invited@example.test")
+    with pytest.raises(HTTPException) as exc_info:
+        SignupProvisioningService().provision_officer_with_invite(
+            session,
+            auth_user("someone-else@example.test"),
+            type("Req", (), {"invite_token": wrong_email_token, "full_name": "Wrong Email"})(),
+        )
+    assert exc_info.value.status_code == 403
+
+    expired_token = SignupProvisioningService._encode_invite_payload({
+        "email": "expired@example.test",
+        "role": "OFFICER",
+        "exp": 1,
+    })
+    with pytest.raises(HTTPException) as exc_info:
+        SignupProvisioningService().provision_officer_with_invite(
+            session,
+            auth_user("expired@example.test"),
+            type("Req", (), {"invite_token": expired_token, "full_name": "Expired Officer"})(),
+        )
+    assert exc_info.value.status_code == 410
 
 
 def test_provision_endpoint_creates_role_selected_profile(session):
