@@ -41,6 +41,8 @@ Covers all 35 required scenarios:
 import uuid
 from datetime import datetime, timezone
 import pytest
+
+pytestmark = pytest.mark.mock_auth
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -82,7 +84,7 @@ def sqlite_session():
         id=user_id,
         email="officer.verma@cpcl.gov.in",
         full_name="Procurement Officer Verma",
-        role="procurement_officer",
+        role="OFFICER",
     )
     session.add(user)
 

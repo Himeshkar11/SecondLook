@@ -17,10 +17,13 @@ import uuid
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import pytest
 from unittest.mock import MagicMock
 from datetime import datetime, timezone
 from urllib.parse import quote
 from fastapi.testclient import TestClient
+
+pytestmark = pytest.mark.mock_auth
 
 from app.main import app
 from app.api.deps import get_db

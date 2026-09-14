@@ -64,13 +64,15 @@ def test_invalid_supabase_token_is_rejected(monkeypatch):
     assert "token" not in str(exc_info.value.detail).lower()
 
 
-def test_service_role_key_is_supported_for_server_side_admin_usage():
+def test_service_role_key_is_supported_for_server_side_admin_usage(monkeypatch):
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
     instance = Settings(
         supabase_url="",
         supabase_key="",
         supabase_service_role_key="service-role-key",
         vite_supabase_url="https://auth.example.test",
         vite_supabase_publishable_key="site-key",
+        _env_file=None,
     )
 
     assert instance.supabase_key == "service-role-key"

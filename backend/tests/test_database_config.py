@@ -3,7 +3,10 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import pytest
 from fastapi.testclient import TestClient
+
+pytestmark = pytest.mark.mock_auth
 
 from app.database.repository import select_one
 from app.main import app

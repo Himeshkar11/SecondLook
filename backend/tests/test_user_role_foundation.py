@@ -41,19 +41,40 @@ def test_canonical_roles_are_valid(session):
     assert {user.role for user in session.query(User).all()} == {"BIDDER", "OFFICER"}
 
 
-def test_arbitrary_role_is_rejected(session):
-    session.add(make_user("invalid@example.test", "ADMIN"))
-    with pytest.raises(IntegrityError):
-        session.commit()
+def test_legacy_and_arbitrary_roles_are_rejected_by_tightened_constraint(session):
+    for invalid_role in ["admin", "procurement_officer", "ADMIN", "bidder", "officer", "superadmin"]:
+        session.rollback()
+        session.add(make_user(f"{invalid_role}@example.test", invalid_role))
+        with pytest.raises(IntegrityError):
+            session.commit()
 
 
-def test_legacy_roles_remain_explicitly_compatible_during_migration(session):
-    session.add_all([
-        make_user("legacy-admin@example.test", "admin"),
-        make_user("legacy-officer@example.test", "procurement_officer"),
-    ])
+def test_raw_sql_insert_bypassing_orm_enforces_check_constraint(session):
+    from sqlalchemy import text
+
+    # Valid roles inserted via raw SQL must succeed
+    valid_id_1 = str(uuid.uuid4())
+    session.execute(
+        text("INSERT INTO users (id, email, full_name, role, is_active) VALUES (:id, :email, :name, :role, 1)"),
+        {"id": valid_id_1, "email": "raw-officer@example.test", "name": "Raw Officer", "role": "OFFICER"},
+    )
+    valid_id_2 = str(uuid.uuid4())
+    session.execute(
+        text("INSERT INTO users (id, email, full_name, role, is_active) VALUES (:id, :email, :name, :role, 1)"),
+        {"id": valid_id_2, "email": "raw-bidder@example.test", "name": "Raw Bidder", "role": "BIDDER"},
+    )
     session.commit()
-    assert {user.role for user in session.query(User).all()} == {"admin", "procurement_officer"}
+
+    # Invalid roles inserted via raw SQL (bypassing ORM) MUST be rejected by database CHECK constraint
+    for bad_role in ["admin", "procurement_officer", "ADMIN", "officer", "bidder", "UNKNOWN"]:
+        session.rollback()
+        with pytest.raises(IntegrityError):
+            session.execute(
+                text("INSERT INTO users (id, email, full_name, role, is_active) VALUES (:id, :email, :name, :role, 1)"),
+                {"id": str(uuid.uuid4()), "email": f"bad-{bad_role}@example.test", "name": "Bad Role", "role": bad_role},
+            )
+            session.commit()
+    session.rollback()
 
 
 def test_bidder_profile_is_one_to_one_with_user(session):

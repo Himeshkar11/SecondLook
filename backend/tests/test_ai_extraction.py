@@ -30,6 +30,8 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+
+pytestmark = pytest.mark.mock_auth
 from fastapi.testclient import TestClient
 
 from app.ai.extractor import (

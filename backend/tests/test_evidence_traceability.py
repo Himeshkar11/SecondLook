@@ -32,6 +32,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 import pytest
+
+pytestmark = pytest.mark.mock_auth
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -72,7 +74,7 @@ def sqlite_session():
         id=user_id,
         email="officer.trace@secondlook.gov.in",
         full_name="Procurement Officer Trace",
-        role="procurement_officer",
+        role="OFFICER",
     )
     session.add(user)
 

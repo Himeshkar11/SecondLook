@@ -47,13 +47,6 @@ def authorization_context():
         full_name="Officer",
         role="OFFICER",
     )
-    legacy_user = User(
-        id=uuid.uuid4(),
-        auth_user_id=uuid.uuid4(),
-        email="legacy@example.test",
-        full_name="Legacy User",
-        role="admin",
-    )
     bidder_a = Bidder(user=bidder_user_a, legal_name="Bidder A Ltd")
     bidder_b = Bidder(user=bidder_user_b, legal_name="Bidder B Ltd")
     document_a = Document(
@@ -72,7 +65,6 @@ def authorization_context():
         bidder_user_a,
         bidder_user_b,
         officer_user,
-        legacy_user,
         bidder_a,
         bidder_b,
         document_a,
@@ -84,7 +76,6 @@ def authorization_context():
         "bidder_a": AuthenticatedIdentity(bidder_user_a.auth_user_id, bidder_user_a),
         "bidder_b": AuthenticatedIdentity(bidder_user_b.auth_user_id, bidder_user_b),
         "officer": AuthenticatedIdentity(officer_user.auth_user_id, officer_user),
-        "legacy": AuthenticatedIdentity(legacy_user.auth_user_id, legacy_user),
     }
 
     app.dependency_overrides[get_db] = lambda: session

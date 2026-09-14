@@ -651,7 +651,7 @@ def sqlite_session():
 
     # Seed demo user, tender, and bidder
     user_id = uuid.uuid4()
-    user = User(id=user_id, email="officer@cpcl.gov.in", full_name="Procurement Officer", role="admin")
+    user = User(id=user_id, email="officer@cpcl.gov.in", full_name="Procurement Officer", role="OFFICER")
     session.add(user)
 
     tender_id = uuid.uuid4()

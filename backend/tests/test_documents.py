@@ -27,6 +27,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 import pytest
+
+pytestmark = pytest.mark.mock_auth
 from fastapi.testclient import TestClient
 
 from app.main import app
