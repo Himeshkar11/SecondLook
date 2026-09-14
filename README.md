@@ -225,6 +225,3 @@ M01 is a repository foundation only. This workspace contains no application feat
 ## License
 
 This foundation repository has been prepared for milestone-based software development. License details should be added when the project begins formal delivery.
-
-password for supabse 
-mBvvVdtNmT8XVhfB
